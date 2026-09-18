@@ -1,0 +1,28 @@
+# --- ROS2 / colcon 构建产物 ---
+ros2_ws/build/
+ros2_ws/install/
+ros2_ws/log/
+CMakeFiles/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+
+# --- 运行日志 ---
+log.txt
+*.log
+
+# --- MANUS SDK 运行库 ---
+# 闭源商业件，两个文件共约 250 MB，且源树内无 license/EULA。
+# 不入库，用 tools/fetch_manus_sdk.sh 从本机 SDK 安装位置恢复。
+ros2_ws/src/manus_ros2/ManusSDK/lib/*.so
+ros2_ws/src/manus_ros2/ManusSDK/lib/*.so.*
+
+# --- 编辑器 ---
+.vscode/
+*.swp
+
+# --- 待删除 ---
+# 旧参考仓库。三个 MANUS 包已 vendor 到 ros2_ws/src/，
+# 确认 colcon build 通过后可整个删除，届时移除本条。
+/Wuji_Retargeting/
