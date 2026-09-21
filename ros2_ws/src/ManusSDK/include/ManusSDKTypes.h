@@ -60,22 +60,47 @@ extern "C"
 /// @brief Used to descriptively refer to the maximum tracker name length.
 /// Used with arrays to make them more descriptive than simply using the
 /// number, and to make changing the number easier and safer.
-#define MAX_NUM_CHARS_IN_TRACKER_ID 32
+#define MAX_NUM_CHARS_IN_TRACKER_ID 256
 
 /// @brief Used to descriptively refer to the maximum tracker manufacturer length.
 /// Used with arrays to make them more descriptive than simply using the
 /// number, and to make changing the number easier and safer.
-#define MAX_NUM_CHARS_IN_TRACKER_MANUFACTURER 32
+#define MAX_NUM_CHARS_IN_TRACKER_MANUFACTURER 256
 
 /// @brief Used to descriptively refer to the maximum tracker manufacturer length.
 /// Used with arrays to make them more descriptive than simply using the
 /// number, and to make changing the number easier and safer.
-#define MAX_NUM_CHARS_IN_TRACKER_PRODUCTNAME 32
+#define MAX_NUM_CHARS_IN_TRACKER_PRODUCTNAME 256
+
+/// @brief Used to descriptively refer to the maximum number of settings in one tracker system.
+/// Used with arrays to make them more descriptive than simply using the
+/// number, and to make changing the number easier and safer.
+#define MAX_NUM_SETTINGS_IN_TRACKERS 4
+
+/// @brief Used to descriptively refer to the maximum number of tracker systems.
+/// Used with arrays to make them more descriptive than simply using the
+/// number, and to make changing the number easier and safer.
+#define MAX_NUM_TRACKER_SYSTEMS 6
+
+/// @brief Used to descriptively refer to the maximum tracker system name length.
+/// Used with arrays to make them more descriptive than simply using the
+/// number, and to make changing the number easier and safer.
+#define MAX_NUM_CHARS_IN_TRACKERSYSTEM 64
+
+/// @brief Used to descriptively refer to the maximum length for tracker system file settings.
+/// Used with arrays to make them more descriptive than simply using the
+/// number, and to make changing the number easier and safer.
+#define MAX_NUM_CHARS_IN_TRACKERSYSTEM_FILE_PATH 256
+
+/// @brief Used to descriptively refer to the maximum length for tracker system file extensions.
+/// Used with arrays to make them more descriptive than simply using the
+/// number, and to make changing the number easier and safer.
+#define MAX_NUM_CHARS_IN_TRACKERSYSTEM_FILE_EXTENSION 16
 
 /// @brief Used to descriptively refer to the maximum target name length.
 /// Used with arrays to make them more descriptive than simply using the
 /// number, and to make changing the number easier and safer.
-#define MAX_NUM_CHARS_IN_TARGET_ID 32
+#define MAX_NUM_CHARS_IN_TARGET_ID 256
 
 /// @brief Used to descriptively refer to the maximum version string length.
 /// Used with arrays to make them more descriptive than simply using the
@@ -208,11 +233,11 @@ extern "C"
 /// @brief Used to define the max amount of net devices
 #define MAX_NUMBER_OF_NETDEVICES  MAX_NUMBER_OF_DONGLES
 
-/// @brief Used to define the max amount of chars allowed in a license
-#define MAX_NUM_CHARS_IN_LICENSE 299
+/// @brief Used to define the max amount of chars allowed in a license.
+#define MAX_NUM_CHARS_IN_LICENSE 4096
 
-/// @brief Used to define the max amount of chars allowed in a command response
-#define MAX_NUM_CHARS_IN_RESPONSE 256
+/// @brief Used to define the max amount of chars allowed in a command message
+#define MAX_NUM_CHARS_IN_MESSAGE 256
 
 /// @brief Matchmaker requirements.
 #define BROADCAST_ADDRESS "255.255.255.255"
@@ -341,7 +366,7 @@ typedef enum TrackingQuality
 	TrackingQuality_Untrackable,
 	TrackingQuality_BadTracking,
 	TrackingQuality_Trackable,
-} TrackerQuality;
+} TrackingQuality;
 
 /// @brief Describes the different types of tracker systems.
 typedef enum TrackerSystemType
@@ -353,7 +378,26 @@ typedef enum TrackerSystemType
 	TrackerSystemType_Optitrack,
 	TrackerSystemType_Vicon,
 	TrackerSystemType_OpenXR,
+	//TODO should this include OSC?
 } TrackerSystemType;
+
+typedef enum TrackerSystemSettingType
+{
+	TrackerSystemSettingType_Undefined,
+	TrackerSystemSettingType_SettingInt,
+	TrackerSystemSettingType_SettingFile,
+	TrackerSystemSettingType_SettingBool,
+	TrackerSystemSettingType_SettingIp,
+
+	TrackerSystemSettingType_MAX_SIZE
+} TrackerSystemSettingType;
+
+typedef enum TrackedPoint
+{
+	TrackedPoint_Unknown,
+	TrackedPoint_Casing,
+	TrackedPoint_Joint
+} TrackedPoint;
 
 /// @brief Describes the paired state of the device.
 typedef enum DevicePairedState
@@ -387,6 +431,9 @@ typedef enum DeviceFamilyType
 	DeviceFamilyType_MetagloveProPrecision,
 	DeviceFamilyType_MetagloveProHaptics,
 	DeviceFamilyType_MetagloveProPrecisionHaptics,
+	DeviceFamilyType_MetagloveAir,
+	DeviceFamilyType_MetagloveAirHaptic,
+	DeviceFamilyType_MetagloveTopModule
 } DeviceFamilyType;
 
 /// @brief Describes the different types of profile used during the calibration.
@@ -498,6 +545,8 @@ typedef enum UpdateStatusEnum
 	UpdateStatusEnum_UpdatingFirmware,
 	UpdateStatusEnum_UpdatingFinalizing,
 	UpdateStatusEnum_UpdatingFailed,
+	UpdateStatusEnum_UpdatingRestartRequired,
+	UpdateStatusEnum_UpdatingTimedOut,
 } UpdateStatusEnum;
 
 /// @brief Describes the different skeleton types. 
@@ -669,7 +718,11 @@ typedef enum SystemMessageType
 	SystemMessageType_LaunchDevTools,
 
 	SystemMessageType_MaxSeatMixing,
-	SystemMessageType_DeprecatedLicense
+	SystemMessageType_DeprecatedLicense,
+
+	SystemMessageType_LicenseSupportExpired,
+
+	SystemMessageType_NetSeatsExhausted // the connected Core is licensed but no network seat is free for this client
 
 } SystemMessageType;
 
@@ -678,10 +731,10 @@ typedef enum ErgonomicsDataType
 {
 //	ErgonomicsDataType_Invalid,
 
-	ErgonomicsDataType_LeftFingerThumbMCPSpread,
+	ErgonomicsDataType_LeftFingerThumbCMCSpread,
+	ErgonomicsDataType_LeftFingerThumbCMCStretch,
 	ErgonomicsDataType_LeftFingerThumbMCPStretch,
-	ErgonomicsDataType_LeftFingerThumbPIPStretch,
-	ErgonomicsDataType_LeftFingerThumbDIPStretch,
+	ErgonomicsDataType_LeftFingerThumbIPStretch,
 
 	ErgonomicsDataType_LeftFingerIndexMCPSpread,
 	ErgonomicsDataType_LeftFingerIndexMCPStretch,
@@ -704,10 +757,10 @@ typedef enum ErgonomicsDataType
 	ErgonomicsDataType_LeftFingerPinkyDIPStretch,
 
 
-	ErgonomicsDataType_RightFingerThumbMCPSpread,
+	ErgonomicsDataType_RightFingerThumbCMCSpread,
+	ErgonomicsDataType_RightFingerThumbCMCStretch,
 	ErgonomicsDataType_RightFingerThumbMCPStretch,
-	ErgonomicsDataType_RightFingerThumbPIPStretch,
-	ErgonomicsDataType_RightFingerThumbDIPStretch,
+	ErgonomicsDataType_RightFingerThumbIPStretch,
 
 	ErgonomicsDataType_RightFingerIndexMCPSpread,
 	ErgonomicsDataType_RightFingerIndexMCPStretch,
@@ -754,6 +807,40 @@ typedef enum LicenseType
 
 } LicenseType;
 
+/// @brief License term / subscription model (orthogonal to the LicenseType SKU above).
+/// Recurring blocks at the end date; Perpetual never expires (keeps running, stops getting updates).
+typedef enum LicenseTermType
+{
+	LicenseTermType_Unknown,
+	LicenseTermType_Recurring,
+	LicenseTermType_Perpetual,
+
+} LicenseTermType;
+
+/// @brief Validity of a dongle's license as evaluated by the Core build reporting it. Lets clients
+/// distinguish a Perpetual license frozen for this (too new) build from plain expiry or corruption.
+typedef enum LicenseStatus
+{
+	LicenseStatus_Unknown,			// no license present / not read yet
+	LicenseStatus_Valid,
+	LicenseStatus_Invalid,			// key or signature did not verify
+	LicenseStatus_Expired,			// past its end date (or not yet valid)
+	LicenseStatus_SupportExpired,	// Perpetual: this build was released after the support window; renew or use an older release
+
+} LicenseStatus;
+
+/// @brief Whether this Core holds one of a connected host's network seats (License NSeat).
+/// A host (Core/bodypack) shares its license with at most NSeat concurrent network clients;
+/// every client still receives device data, but only seat holders receive the license.
+typedef enum NetSeatState
+{
+	NetSeatState_Unknown,			// no info yet, or the host predates seat reporting
+	NetSeatState_SeatGranted,		// we hold a seat: the host's license applies here
+	NetSeatState_AllSeatsTaken,		// host is licensed but no seat is free (total 0 = license has no seats)
+	NetSeatState_HostUnlicensed,	// the host has no valid license to hand out
+
+} NetSeatState;
+
 /// @brief The possible FPS rates
 typedef enum TimecodeFPS
 {
@@ -793,6 +880,15 @@ typedef enum SetGloveCalibrationReturnCode
 
 	SetGloveCalibrationReturnCode_MAX_SIZE
 } SetGloveCalibrationReturnCode;
+
+typedef enum MessageType
+{
+	MessageType_Unknown,
+	MessageType_Info,
+	MessageType_Success,
+	MessageType_Warning,
+	MessageType_Error
+} MessageType;
 
 /******************************************************************************
  * Structs.
@@ -900,6 +996,21 @@ typedef struct ManusHost
 	Version manusCoreVersion;
 } ManusHost;
 
+/// @brief Stores a message from the backend. 
+typedef struct Message
+{
+	MessageType type;
+	char message[MAX_NUM_CHARS_IN_MESSAGE];
+} Message;
+
+
+/// @brief Stores the reponse information for calls to the backend. 
+typedef struct Response
+{
+	bool result;
+	Message message;
+} Response;
+
 /******************************************************************************
  * Tracking
  *****************************************************************************/
@@ -909,7 +1020,7 @@ typedef struct ManusHost
 /// @brief Stores the name of a tracker.
 typedef struct TrackerId
 {
-	char id[MAX_NUM_CHARS_IN_TRACKER_ID]; // todo. make this UTF8 compliant ?
+	char id[MAX_NUM_CHARS_IN_TRACKER_ID]; // this is for a UTF8 string , NOT an ASCII CHAR array (same base type though)
 } TrackerId;
 
 /// @brief Stores all the tracker data that can be sent or received.
@@ -928,6 +1039,8 @@ typedef struct TrackerData
 	ManusVec3 position;
 
 	TrackingQuality quality; //default = TrackingQuality::TrackingQuality_Untrackable;
+
+	TrackedPoint trackedPoint;
 } TrackerData;
 
 
@@ -937,6 +1050,56 @@ typedef struct TrackerStreamInfo
 	ManusTimestamp publishTime; //default = 0;	//	DateTime.UtcNow.
 	uint32_t trackerCount; //default = 0;
 } TrackerStreamInfo;
+
+typedef struct TrackingSystemInfo
+{
+	char name[MAX_NUM_CHARS_IN_TRACKERSYSTEM];
+	char description[MAX_NUM_CHARS_IN_TRACKERSYSTEM];
+} TrackingSystemInfo;
+
+typedef struct TrackerSystemSettingBool
+{
+	bool value; //default = false;
+} TrackerSystemSettingBool;
+
+
+typedef struct TrackerSystemSettingFile
+{
+	char value[MAX_NUM_CHARS_IN_TRACKERSYSTEM_FILE_PATH];
+	char extension[MAX_NUM_CHARS_IN_TRACKERSYSTEM_FILE_EXTENSION];
+} TrackerSystemSettingFile;
+
+typedef struct TrackerSystemSettingInt
+{
+	int32_t value; //default = 0;
+	int32_t min; //default = 0;
+	int32_t max; //default = 0;
+} TrackerSystemSettingInt;
+
+typedef struct TrackerSystemSettingIp
+{
+	char value[MAX_NUM_CHARS_IN_IP_ADDRESS];
+} TrackerSystemSettingIp;
+
+typedef struct TrackerSystemSetting
+{
+	char id[MAX_NUM_CHARS_IN_TRACKERSYSTEM];
+
+	TrackerSystemSettingInt settingInt;
+	TrackerSystemSettingFile settingFile;
+	TrackerSystemSettingBool settingBool;
+	TrackerSystemSettingIp settingIp;
+
+	TrackerSystemSettingType settingtype;
+} TrackerSystemSetting;
+
+typedef struct TrackerSystem
+{
+	char id[MAX_NUM_CHARS_IN_TRACKERSYSTEM];
+	bool active; //default = false;
+	TrackerSystemSetting trackerSystemSettings[MAX_NUM_SETTINGS_IN_TRACKERS];
+	uint32_t currentSettingsCount; //default = 0;
+} TrackerSystem;
 
 // ------------------------------------------------------------------------------------------------------------------------------
 // end of Tracking
@@ -1093,7 +1256,11 @@ typedef struct DongleLandscapeData
 	uint32_t licenseMaxNumberOfGlovePairs;
 
 	uint32_t netDeviceID;
-	
+
+	char licenseName[MAX_NUM_CHARS_IN_LICENSE_TYPE]; // display-only tier label (e.g. "Robotics")
+	LicenseTermType licenseTermType; // Recurring / Perpetual (V3); Unknown for V2
+	LicenseStatus licenseStatus; // why the license is (not) usable on the reporting Core build
+
 } DongleLandscapeData;
 
 /// @brief Stores all the received glove data.
@@ -1161,6 +1328,7 @@ typedef struct TrackerLandscapeData
 	bool isHMD; //default = false;
 	char manufacturer[MAX_NUM_CHARS_IN_TRACKER_MANUFACTURER]; // default = "Unknown"
 	char productName[MAX_NUM_CHARS_IN_TRACKER_PRODUCTNAME]; // default = "Unknown"
+	TrackedPoint trackedPoint;
 } TrackerLandscapeData;
 
 /// @brief Stores all the received user profile data.
@@ -1255,6 +1423,8 @@ typedef struct LicenseInfo
 	bool noraxonSession; //default = false;
 	bool noitomSession; //default = false;
 	bool abletonSession; //default = false;
+	bool linuxTarget; //default = false;
+	uint32_t netSeats; //default = 0; NSeat: concurrent networked clients this license may serve (a parsed license without the field gets 1)
 } LicenseInfo;
 
 /// @brief Stores the landscape settings.
@@ -1305,6 +1475,10 @@ typedef struct NetDeviceLandscapeData
 	uint32_t netDeviceID;
 	char hostname[MAX_NUM_CHARS_IN_HOST_NAME];
 	char ip[MAX_NUM_CHARS_IN_IP_ADDRESS];
+
+	NetSeatState netSeatState;	// why we do/don't have this host's license
+	uint32_t netSeatsTotal;		// 0 when the host is unlicensed or its license has no seats
+	uint32_t netSeatsUsed;		// includes reconnect grace holds
 } NetDeviceLandscapeData;
 
 /// @brief Contains information about a single net device
@@ -1312,7 +1486,7 @@ typedef struct NetDevicesLandscape
 {
 	uint32_t numberOfNetDevices; // default = 0;
 	NetDeviceLandscapeData netDevices[MAX_NUMBER_OF_NETDEVICES];
-} NetDeviceLandscape;
+} NetDevicesLandscape;
 
 /// @brief Stores the landscape data.
 typedef struct Landscape
@@ -1572,7 +1746,7 @@ typedef struct SkeletonTargetUserIndexData
 /// @brief Stores the information regarding the animation data used to animate the skeleton.
 typedef struct SkeletonTargetAnimationData
 {
-	char id[MAX_NUM_CHARS_IN_TARGET_ID];
+	char id[MAX_NUM_CHARS_IN_TARGET_ID]; // this is for a UTF8 string , NOT an ASCII CHAR array (same base type though)
 } SkeletonTargetAnimationData;
 
 /// @brief Stores the information regarding the glove data used to animate the skeleton.

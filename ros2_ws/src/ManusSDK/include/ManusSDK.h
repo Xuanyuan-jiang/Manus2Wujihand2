@@ -39,9 +39,12 @@ extern "C"
 	/// SDKReturnCode_FunctionCalledAtWrongTime if the function was not intended to be called at this time.
 	CORESDK_API SDKReturnCode CoreSdk_InitializeCore();
 
-	/// @brief Initialize Core Integrated wrapper. 
+	/// @brief Initialize Core Integrated wrapper.
 	/// Call this before using the wrapper.
-	/// @return SDKReturnCode_Success if successful, 
+	/// The session type defaults to SessionType_CoreSDK and can be changed afterwards with
+	/// CoreSdk_SetSessionType. The license must contain the 'Integrated' feature in
+	/// addition to the feature for the chosen session type.
+	/// @return SDKReturnCode_Success if successful,
 	/// SDKReturnCode_FunctionCalledAtWrongTime if the function was not intended to be called at this time.
 	CORESDK_API SDKReturnCode CoreSdk_InitializeIntegrated();
 
@@ -53,9 +56,10 @@ extern "C"
 
 	/// @brief Set the session type
 	/// This has to be called before a connection is made.
-	/// @param p_SessionType 
-	/// @return SDKReturnCode_Success if successful, 
-	/// SDKReturnCode_SdkNotAvailable if the Core SDK is not available.
+	/// @param p_SessionType
+	/// @return SDKReturnCode_Success if successful,
+	/// SDKReturnCode_SdkNotAvailable if the Core SDK is not available,
+	/// SDKReturnCode_InvalidArgument if the session type is not valid.
 	CORESDK_API SDKReturnCode CoreSdk_SetSessionType(SessionType p_SessionType);
 
 	/// @brief Set the settings location
@@ -266,10 +270,22 @@ extern "C"
 	 * Basic glove interaction.
 	 *****************************************************************************/
 
-	CORESDK_API SDKReturnCode CoreSdk_SetLicense(uint32_t p_DongleId, const char* p_LicenseString, uint32_t p_LicenseStringSize, bool* p_Result, char* p_Response);
-	CORESDK_API SDKReturnCode CoreSdk_ClearLicense(uint32_t p_DongleId, bool* p_Result, char* p_Response);
+	 /// @brief Sets the license for a specified dongle
+	 /// @param p_DongleId 
+	 /// @param p_LicenseString 
+	 /// @param p_LicenseStringSize 
+	 /// @param p_Result 
+	 /// @param p_Response
+	 /// @return SDKReturnCode_Success if successful, 
+	 /// SDKReturnCode_SdkNotAvailable if the Core SDK is not available,
+	 /// SDKReturnCode_NotConnected if there is no connection to core.
+	CORESDK_API SDKReturnCode CoreSdk_SetLicense(uint32_t p_DongleId, const char* p_LicenseString, uint32_t p_LicenseStringSize, Response* p_Response);
 
-	CORESDK_API SDKReturnCode CoreSdk_UpdateFirmware(uint32_t p_DeviceId, bool* p_Result, char* p_Response);
+	 /// @brief Retrieve/fetch the newest license for a dongle. Core reads the dongle's current
+	 /// license, exchanges it with the license service, and writes back the newest license.
+	CORESDK_API SDKReturnCode CoreSdk_RetrieveLicense(uint32_t p_DongleId, Response* p_Response);
+
+	CORESDK_API SDKReturnCode CoreSdk_UpdateFirmware(uint32_t p_DeviceId, Response* p_Response);
 
 	/// @brief Try to pair a glove to a dongle
 	/// @param p_GloveID 
@@ -289,18 +305,6 @@ extern "C"
 	/// @return SDKReturnCode_Success if successful, 
 	/// SDKReturnCode_SdkNotAvailable if the Core SDK is not available.
 	CORESDK_API SDKReturnCode CoreSdk_UnpairGlove(uint32_t p_GloveID, bool* p_Result);
-
-	/// @brief Vibrate the motor on the given fingers of a haptic glove.
-	/// The order of the fingers is Thumb, Index, Middle, Ring, Pinky.
-	/// @param p_DongleId 
-	/// @param p_HandType 
-	/// @param p_Powers strength of the vibration, should be an array of 5 values
-	/// @return SDKReturnCode_Success if successful, 
-	/// SDKReturnCode_SdkNotAvailable if the Core SDK is not available,
-	/// SDKReturnCode_NotConnected if there is no connection to core.
-	/// @deprecated Use CoreSdk_VibrateFingersForGlove or CoreSdk_VibrateFingersForSkeleton instead
-	[[deprecated("Use CoreSdk_VibrateFingersForGlove or CoreSdk_VibrateFingersForSkeleton instead")]]
-	CORESDK_API SDKReturnCode CoreSdk_VibrateFingers(uint32_t p_DongleId, Side p_HandType, const float* p_Powers);
 
 	/// @brief Vibrate the motor on the given fingers of a haptic glove.
 	/// The order of the fingers is Thumb, Index, Middle, Ring, Pinky.
@@ -430,34 +434,6 @@ extern "C"
 	/// @return SDKReturnCode_Success if successful, 
 	/// SDKReturnCode_SdkNotAvailable if the Core SDK is not available.
 	CORESDK_API SDKReturnCode CoreSdk_GetRawSkeletonCasingCompensation(float* p_FilterStength);
-
-	/******************************************************************************
-	 * Haptics module.
-	 *****************************************************************************/
-
-	 /// @brief Get the number of available haptics dongles.
-	 /// @param p_NumberOfHapticsDongles 
-	 /// @return SDKReturnCode_Success if successful, 
-	 /// SDKReturnCode_SdkNotAvailable if the Core SDK is not available,
-	 /// SDKReturnCode_NotConnected if there is no connection to core,
-	 /// SDKReturnCode_InternalError if the number of haptic dongles found is higher than the defined MAX_NUMBER_OF_HAPTICS_DONGLES.
-	 /// @deprecated Get this through the Landscape instead
-	[[deprecated("Get this through the Landscape instead")]]
-	CORESDK_API SDKReturnCode CoreSdk_GetNumberOfHapticsDongles(uint32_t* p_NumberOfHapticsDongles);
-
-	/// @brief Fill the given array with the IDs of all available haptics dongles.
-	/// The size of the given array must match the number of available haptics dongles.
-	/// Note that the number of available haptics dongles can change at any time.
-	/// @param p_HapticsDongleIds 
-	/// @param p_NumberOfIdsThatFitInArray 
-	/// @return SDKReturnCode_Success if successful, 
-	/// SDKReturnCode_SdkNotAvailable if the Core SDK is not available,
-	/// SDKReturnCode_NotConnected if there is no connection to core,
-	/// SDKReturnCode_ArgumentSizeMismatch if p_NumberOfIdsThatFitInArray does not match with the number of haptic dongles found, 
-	/// SDKReturnCode_InvalidArgument if p_NumberOfIdsThatFitInArray is zero or higher than the defined MAX_NUMBER_OF_HAPTICS_DONGLES.
-	/// @deprecated Get this through the Landscape instead
-	[[deprecated("Get this through the Landscape instead")]]
-	CORESDK_API SDKReturnCode CoreSdk_GetHapticsDongleIds(uint32_t* p_HapticsDongleIds, uint32_t p_NumberOfIdsThatFitInArray);
 
 	/******************************************************************************
 	 * Users.
@@ -598,7 +574,7 @@ extern "C"
 	/// SDKReturnCode_InvalidArgument if p_NumberOfTrackers is null or higher than the defined MAX_NUMBER_OF_TRACKERS.
 	CORESDK_API SDKReturnCode CoreSdk_SendDataForTrackers(const TrackerData* p_TrackerData, uint32_t p_NumberOfTrackers);
 
-	/// @brief Sets the offset of a tracker for a specified user
+	/// @brief Sets the offset of a tracker for a specified user.
 	/// @param p_UserId
 	/// @param p_TrackerOffset
 	/// @return SDKReturnCode_Success if successful, 
@@ -606,6 +582,81 @@ extern "C"
 	/// SDKReturnCode_StubNullPointer if the stub has been reset but someone is trying to use it anyway. This usually happens after a shutdown of the SDK,
 	/// SDKReturnCode_NotConnected if there is no connection to core.
 	CORESDK_API SDKReturnCode CoreSdk_SetTrackerOffset(uint32_t p_UserId, const TrackerOffset* p_TrackerOffset);
+
+	/// @brief Assigns the tracker to a user.
+	/// Assign a tracker to ID 0 to unassign it.
+	/// @param p_TrackerId
+	/// @param p_UserId
+	/// @return SDKReturnCode_Success if successful, 
+	/// SDKReturnCode_SdkNotAvailable if the Core SDK is not available,
+	/// SDKReturnCode_StubNullPointer if the stub has been reset but someone is trying to use it anyway. This usually happens after a shutdown of the SDK,
+	/// SDKReturnCode_NotConnected if there is no connection to core.
+	/// SDKReturnCode_DataNotAvailable if the tracker was not found.
+	CORESDK_API SDKReturnCode CoreSdk_AssignTrackerToUser(TrackerId p_TrackerId, uint32_t p_UserId);
+
+	/// @brief Sets what bodypart the tracker tracks
+	/// @param p_TrackerId
+	/// @param p_UserId
+	/// @return SDKReturnCode_Success if successful, 
+	/// SDKReturnCode_SdkNotAvailable if the Core SDK is not available,
+	/// SDKReturnCode_StubNullPointer if the stub has been reset but someone is trying to use it anyway. This usually happens after a shutdown of the SDK,
+	/// SDKReturnCode_NotConnected if there is no connection to core.
+	/// SDKReturnCode_DataNotAvailable if the tracker was not found.
+	CORESDK_API SDKReturnCode CoreSdk_AssignRoleToTracker(TrackerId p_TrackerId, TrackerType p_TrackerType);
+
+	/// @brief Gets the settings of all available tracker systems
+	/// @param p_TrackerSystems
+	/// @param p_TrackerSystemCount
+	/// @return SDKReturnCode_Success if successful,
+	/// SDKReturnCode_SdkNotAvailable if the Core SDK is not available,
+	/// SDKReturnCode_StubNullPointer if the stub has been reset but someone is trying to use it anyway. This usually happens after a shutdown of the SDK,
+	/// SDKReturnCode_NotConnected if there is no connection to core.
+	CORESDK_API SDKReturnCode CoreSdk_GetTrackerSystemsSettings(TrackerSystem* p_TrackerSystems, uint32_t* p_TrackerSystemCount);
+
+	/// @brief Sets the settings for tracker systems.
+	/// The TrackerSystem array should be initialized through CoreSdk_GetTrackerSystemsSettings.
+	/// @param p_TrackerSystems
+	/// @return SDKReturnCode_Success if successful,
+	/// SDKReturnCode_SdkNotAvailable if the Core SDK is not available,
+	/// SDKReturnCode_StubNullPointer if the stub has been reset but someone is trying to use it anyway. This usually happens after a shutdown of the SDK,
+	/// SDKReturnCode_NotConnected if there is no connection to core.
+	CORESDK_API SDKReturnCode CoreSdk_SetTrackerSystemsSettings(TrackerSystem* p_TrackerSystems);
+
+	/// @brief Sets whether tracker timeouts are enabled.
+	/// If this is enabled, trackers are removed if they have not been updated after the tracker time out time has passed.
+	/// @param p_UseTimeOut
+	/// @return SDKReturnCode_Success if successful,
+	/// SDKReturnCode_SdkNotAvailable if the Core SDK is not available,
+	/// SDKReturnCode_StubNullPointer if the stub has been reset but someone is trying to use it anyway. This usually happens after a shutdown of the SDK,
+	/// SDKReturnCode_NotConnected if there is no connection to core.
+	CORESDK_API SDKReturnCode CoreSdk_SetTrackerTimeOutEnabled(bool p_UseTimeOut);
+
+	/// @brief Gets whether tracker time outs are enabled.
+	/// If this is enabled, trackers are removed if they have not been updated after the tracker time out time has passed.
+	/// @param p_UseTimeOut
+	/// @return SDKReturnCode_Success if successful,
+	/// SDKReturnCode_SdkNotAvailable if the Core SDK is not available,
+	/// SDKReturnCode_StubNullPointer if the stub has been reset but someone is trying to use it anyway. This usually happens after a shutdown of the SDK,
+	/// SDKReturnCode_NotConnected if there is no connection to core.
+	CORESDK_API SDKReturnCode CoreSdk_GetTrackerTimeOutEnabled(bool* p_UseTimeOut);
+
+	/// @brief Sets the duration before a tracker is timed out.
+	/// This is only used if tracker time outs are enabled
+	/// @param p_UseTimeOut
+	/// @return SDKReturnCode_Success if successful,
+	/// SDKReturnCode_SdkNotAvailable if the Core SDK is not available,
+	/// SDKReturnCode_StubNullPointer if the stub has been reset but someone is trying to use it anyway. This usually happens after a shutdown of the SDK,
+	/// SDKReturnCode_NotConnected if there is no connection to core.
+	CORESDK_API SDKReturnCode CoreSdk_SetTrackerTimeOut(float p_TimeOut);
+
+	/// @brief Gets the duration before a tracker is timed out.
+	/// This is only used if tracker time outs are enabled
+	/// @param p_UseTimeOut
+	/// @return SDKReturnCode_Success if successful,
+	/// SDKReturnCode_SdkNotAvailable if the Core SDK is not available,
+	/// SDKReturnCode_StubNullPointer if the stub has been reset but someone is trying to use it anyway. This usually happens after a shutdown of the SDK,
+	/// SDKReturnCode_NotConnected if there is no connection to core.
+	CORESDK_API SDKReturnCode CoreSdk_GetTrackerTimeOut(float* p_TimeOut);
 
 	/******************************************************************************
 	 * Gestures.
@@ -683,14 +734,60 @@ extern "C"
 	/// SDKReturnCode_NotConnected if there is no connection to core
 	CORESDK_API SDKReturnCode CoreSdk_GloveCalibrationStartStep(GloveCalibrationStepArgs p_CalibrationStepArgs, bool* p_Result);
 
+	/// @brief Prepare calibration of specific glove for saving to file and get its size.
+	/// The glove must be connected.
+	/// @param p_GloveId
+	/// @param p_Size
+	/// @return SDKReturnCode_Success if successful,
+	/// SDKReturnCode_SdkNotAvailable if the Core SDK is not available,
+	/// SDKReturnCode_NotConnected if there is no connection to core
+	/// SDKReturnCode_DataNotAvailable if something went wrong getting the calibration
 	CORESDK_API SDKReturnCode CoreSdk_GetGloveCalibrationSize(uint32_t p_GloveId, uint32_t* p_Size);
 
+	/// @brief Prepare calibration of specific user's glove for saving to file and get its size.
+	/// p_UserId and p_Side determine which glove's calibration will be prepared.
+	/// Users contain separate calibrations for Metagloves and Metaglove Pros. Therefore the desired type must be specified using p_ProfileType.
+	/// @param p_UserId
+	/// @param p_Side,
+	/// @param p_ProfileType
+	/// @param p_Size
+	/// @return SDKReturnCode_Success if successful,
+	/// SDKReturnCode_SdkNotAvailable if the Core SDK is not available,
+	/// SDKReturnCode_NotConnected if there is no connection to core
+	/// SDKReturnCode_DataNotAvailable if something went wrong getting the calibration
 	CORESDK_API SDKReturnCode CoreSdk_GetGloveCalibrationSizeForUser(uint32_t p_UserId, Side p_Side, GloveProfileType p_ProfileType, uint32_t* p_Size);
 
+	/// @brief Get the calibration that was prepared with CoreSdk_GetGloveCalibrationSize or CoreSdk_GetGloveCalibrationSizeForUser so it can be saved to a file.
+	/// The calibration will be outputted through p_CalibrationBytes.
+	/// Use the size that was returned through p_Size in CoreSdk_GetGloveCalibrationSize or CoreSdk_GetGloveCalibrationSizeForUser for the p_BytesLength parameter.
+	/// @param p_CalibrationBytes
+	/// @param p_BytesLength
+	/// @return SDKReturnCode_Success if successful,
+	/// SDKReturnCode_SdkNotAvailable if the Core SDK is not available,
+	/// SDKReturnCode_NotConnected if there is no connection to core
+	/// SDKReturnCode_ArgumentSizeMismatch if the size of the calibration does not match p_BytesLength
 	CORESDK_API SDKReturnCode CoreSdk_GetGloveCalibration(unsigned char* p_CalibrationBytes, uint32_t p_BytesLength);
 
+	/// @brief Load a calibration file to a specific glove.
+	/// Keep in mind that the glove must be connected.
+	/// @param p_GloveId
+	/// @param p_CalibrationBytes
+	/// @param p_BytesLength
+	/// @param p_Result 
+	/// @return SDKReturnCode_Success if successful,
+	/// SDKReturnCode_SdkNotAvailable if the Core SDK is not available,
+	/// SDKReturnCode_NotConnected if there is no connection to core
 	CORESDK_API SDKReturnCode CoreSdk_SetGloveCalibration(uint32_t p_GloveId, unsigned char* p_CalibrationBytes, uint32_t p_BytesLength, SetGloveCalibrationReturnCode* p_Result);
 
+	/// @brief Load a calibration file to a specific user.
+	/// The calibration will be loaded to the corresponding side for the user.
+	/// @param p_UserId
+	/// @param p_CalibrationBytes
+	/// @param p_BytesLength
+	/// @param p_Result 
+	/// @return SDKReturnCode_Success if successful,
+	/// SDKReturnCode_SdkNotAvailable if the Core SDK is not available,
+	/// SDKReturnCode_NotConnected if there is no connection to core
 	CORESDK_API SDKReturnCode CoreSdk_SetGloveCalibrationForUser(uint32_t p_UserId, unsigned char* p_CalibrationBytes, uint32_t p_BytesLength, SetGloveCalibrationReturnCode* p_Result);
 
 	/******************************************************************************
@@ -985,7 +1082,7 @@ extern "C"
 	/// SDKReturnCode_SdkNotAvailable if the Core SDK is not available,
 	/// SDKReturnCode_NotConnected if there is no connection to core,
 	/// SDKReturnCode_InvalidID if the provided glove id does not match any skeleton in core
-	CORESDK_API SDKReturnCode CoreSdk_GetRawSkeletonNodeCount(uint32_t p_GloveId, uint32_t& p_NodeCount);
+	CORESDK_API SDKReturnCode CoreSdk_GetRawSkeletonNodeCount(uint32_t p_GloveId, uint32_t* p_NodeCount);
 
 	/// @brief Get the information for nodes of the raw skeleton with given id 
 	/// The size of the given array p_NodeInfo must match the node count retrieved from CoreSdk_GetRawSkeletonNodeCount.
@@ -1154,10 +1251,21 @@ extern "C"
 	/// SDKReturnCode_NotConnected if there is no connection to core.
 	CORESDK_API SDKReturnCode CoreSdk_SetUserName(uint32_t p_Id, char* p_Name);
 
+	/// @brief chec if Auto-Assignment of gloves is enabled.
+	/// With this setting enabled, when new devices are connected these are automatically assigned.
+	/// Users are automatically created and deleted as needed.
+	/// This setting is only available in Core Integrated and on by default.
+	/// @param p_Enabled
+	/// @return SDKReturnCode_Success if successful, 
+	/// SDKReturnCode_SdkNotAvailable if the Core SDK is not available,
+	/// SDKReturnCode_StubNullPointer if the stub has been reset but someone is trying to use it anyway. This usually happens after a shutdown of the SDK,
+	/// SDKReturnCode_NotConnected if there is no connection to core.
+	CORESDK_API SDKReturnCode CoreSdk_GetAutoUserAssignment(bool* p_Enabled);
+
 	/// @brief Disable or re-enable Auto-Assignment of gloves.
 	/// With this setting enabled, when new devices are connected these are automatically assigned.
 	/// Users are automatically created and deleted as needed.
-	/// This setting is on by default.
+	/// This setting is only available in Core Integrated and on by default.
 	/// @param p_Enabled
 	/// @return SDKReturnCode_Success if successful, 
 	/// SDKReturnCode_SdkNotAvailable if the Core SDK is not available,

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Safely retarget ROS /hand_input data to a Wuji Hand 2.
+"""Safely retarget ROS hand-input data to a Wuji Hand 2 (left or right).
 
 The default mode is dry-run: it only prints the 20 retargeted joint angles and
 never connects to, enables, or commands the physical hand.  Hardware control
@@ -17,16 +17,33 @@ from typing import Optional
 
 import numpy as np
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from rclpy.utilities import remove_ros_args
 from std_msgs.msg import Float32MultiArray
-from wuji_sdk import HandModel, Handedness, JointCommand, RetargetSession, SdkManager
+from wuji_sdk import (
+    HandModel,
+    Handedness,
+    JointCommand,
+    RetargetSession,
+    SdkManager,
+    WujiHand2,
+)
 
 
 JOINT_COUNT = 20
 INPUT_FLOAT_COUNT = 21 * 3
-CONFIRMATION_PHRASE = "I_UNDERSTAND_THIS_MOVES_HARDWARE"
+# 默认即实体控制；`--dry-run` 才是只打印不下发。
+# 早期版本反过来（默认 dry-run，实体控制需 --control 加确认短语），那道闸在
+# 骨架错位、手性镜像、标定写反这三次故障中挡住了实体动作。现在它没有了，
+# 越界保护只剩运行时的这几层：20 轴限位 clamp、每轴限速、输入 watchdog、
+# 关节故障按 severity 分级失能。改动参数前先看 README 的「安全」一节。
+# 本机的两只 Hand 2。handedness 已逐台向设备核实（h.handedness()），不是靠 SN 猜的。
+DEFAULT_ADDRESSES = {
+    "right": "192.168.1.111:7447",  # WH2KA01260818006
+    "left": "192.168.1.110:7447",   # WH2JA01260813009
+}
 
 # Official Wuji Hand 2 Beta 2 joint ranges, in command order, converted to rad.
 # Thumb S1..S4 followed by index/middle/ring/pinky S1..S4.
@@ -39,6 +56,7 @@ JOINT_LIMITS_RAD = np.deg2rad(
 
 @dataclass(frozen=True)
 class ControllerConfig:
+    side: str
     topic: str
     address: str
     control: bool
@@ -72,6 +90,39 @@ def rate_limit_positions(
     return current + delta
 
 
+def classify_joint_errors(joints) -> tuple[list, list]:
+    """把关节故障码分成「必须停机」和「仅警告」两类。
+
+    固件的故障目录分四级 severity：Warning / DeferredStop / ImmediateStop / Fatal。
+    只有 Warning 级不停机 —— 这一级多为 AutoClear 的数据质量提示（例如
+    ``Enc1BitRate`` 编码器 bit 标志率偏高），SDK 自己也只打 WARN。把它们当致命
+    错误会在正常动作幅度稍大时误触发 fail-safe。
+
+    无法识别的非零码（SDK 比固件旧）一律按停机处理，并把原始码报出来。
+    """
+    blocking: list = []
+    warnings: list = []
+    for joint in joints:
+        code = int(joint.error_code_current)
+        if code == 0:
+            continue
+        info = WujiHand2.describe_error(code)
+        name = info["name"] if info else "Unknown"
+        severity = info["severity"] if info else "Unknown"
+        entry = (int(joint.nid), code, name, severity)
+        if info is not None and severity == "Warning":
+            warnings.append(entry)
+        else:
+            blocking.append(entry)
+    return blocking, warnings
+
+
+def format_joint_errors(entries: list) -> str:
+    return ", ".join(
+        f"nid={nid} 0x{code:04X}({name},{severity})" for nid, code, name, severity in entries
+    )
+
+
 def nid_to_command_index(nid: int) -> Optional[int]:
     """Map the SDK's 5-slot bus NID layout to the contiguous 20-axis order."""
     if nid <= 0:
@@ -96,11 +147,10 @@ class ManusWuji2Controller(Node):
     """Consume MediaPipe landmarks and optionally command a Wuji Hand 2."""
 
     def __init__(self, config: ControllerConfig):
-        super().__init__("manus_wuji2")
+        super().__init__(f"manus_wuji2_{config.side}")
         self.config = config
-        self.session = RetargetSession.for_hand(
-            HandModel.WujiHand2, side=Handedness.Right
-        )
+        handedness = Handedness.Left if config.side == "left" else Handedness.Right
+        self.session = RetargetSession.for_hand(HandModel.WujiHand2, side=handedness)
 
         self._latest_keypoints: Optional[np.ndarray] = None
         self._latest_input_time: Optional[float] = None
@@ -115,6 +165,7 @@ class ManusWuji2Controller(Node):
         self._post_enable_deadline = 0.0
         self._stale_reported = False
         self._clamp_total = 0
+        self._last_warning_log_time = 0.0
         self.shutdown_requested = False
 
         self._manager = None
@@ -142,7 +193,8 @@ class ManusWuji2Controller(Node):
                 "DRY-RUN mode: the physical hand will not be connected or commanded"
             )
         self.get_logger().info(
-            f"subscribed to {config.topic} as BEST_EFFORT; expected 63 floats"
+            f"[{config.side}] subscribed to {config.topic} as BEST_EFFORT; "
+            f"expected 63 floats"
         )
 
     def _input_callback(self, message: Float32MultiArray) -> None:
@@ -314,26 +366,24 @@ class ManusWuji2Controller(Node):
             subscription.close()
         if len(frame.joints) != JOINT_COUNT:
             raise RuntimeError(f"diagnostics contains {len(frame.joints)}/20 joints")
-        errors = [
-            (int(joint.nid), int(joint.error_code_current))
-            for joint in frame.joints
-            if int(joint.error_code_current) != 0
-        ]
-        if errors:
-            raise RuntimeError(f"active joint errors: {errors}")
+        blocking, warnings = classify_joint_errors(frame.joints)
+        if warnings:
+            self.get_logger().warning(
+                f"joint warnings (not blocking): {format_joint_errors(warnings)}"
+            )
+        if blocking:
+            raise RuntimeError(f"active joint errors: {format_joint_errors(blocking)}")
 
     def _wait_enabled(self, timeout_s: float = 5.0) -> None:
         deadline = time.monotonic() + timeout_s
         while time.monotonic() < deadline:
             frame = self._diagnostics.recv()
             if frame is not None and len(frame.joints) == JOINT_COUNT:
-                errors = [
-                    (int(joint.nid), int(joint.error_code_current))
-                    for joint in frame.joints
-                    if int(joint.error_code_current) != 0
-                ]
-                if errors:
-                    raise RuntimeError(f"active joint errors while enabling: {errors}")
+                blocking, _ = classify_joint_errors(frame.joints)
+                if blocking:
+                    raise RuntimeError(
+                        f"active joint errors while enabling: {format_joint_errors(blocking)}"
+                    )
                 if all(joint.status_word.ext_state == 2 for joint in frame.joints):
                     return
             time.sleep(0.005)
@@ -341,11 +391,13 @@ class ManusWuji2Controller(Node):
 
     def _start_hardware(self) -> None:
         self.get_logger().warning(
-            f"connecting to physical Wuji Hand 2 at {self.config.address}"
+            f"connecting to physical {self.config.side} Wuji Hand 2 "
+            f"at {self.config.address}"
         )
         self._manager = SdkManager.instance()
         self._hand = self._manager.connect(
-            address=self.config.address, device_name="wuji_hand_2"
+            address=self.config.address,
+            device_name=f"wuji_hand_2_{self.config.side}",
         )
         count = int(self._hand.online_joints_count().get())
         if count != JOINT_COUNT:
@@ -395,13 +447,17 @@ class ManusWuji2Controller(Node):
             latest = frame
         if latest is None:
             return
-        errors = [
-            (int(joint.nid), int(joint.error_code_current))
-            for joint in latest.joints
-            if int(joint.error_code_current) != 0
-        ]
-        if errors:
-            raise RuntimeError(f"active joint errors: {errors}")
+        blocking, warnings = classify_joint_errors(latest.joints)
+        if warnings:
+            # 控制环跑在 100 Hz，警告必须限流，否则日志会淹没真正的问题。
+            now = time.monotonic()
+            if now - self._last_warning_log_time >= 2.0:
+                self._last_warning_log_time = now
+                self.get_logger().warning(
+                    f"joint warnings (not blocking): {format_joint_errors(warnings)}"
+                )
+        if blocking:
+            raise RuntimeError(f"active joint errors: {format_joint_errors(blocking)}")
         if len(latest.joints) != JOINT_COUNT or not all(
             joint.status_word.ext_state == 2 for joint in latest.joints
         ):
@@ -453,48 +509,57 @@ def _positive_float(value: str) -> float:
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Retarget /hand_input to Wuji Hand 2 (dry-run by default)."
+        description=(
+            "Retarget MANUS hand input to a Wuji Hand 2. "
+            "默认即连接并驱动实体手；只想看重定向数值请加 --dry-run。"
+        )
     )
-    parser.add_argument("--topic", default="/hand_input")
-    parser.add_argument("--address", default="192.168.1.111:7447")
-    mode = parser.add_mutually_exclusive_group()
-    mode.add_argument(
+    parser.add_argument(
+        "--side",
+        choices=("right", "left"),
+        default="right",
+        help="which hand to drive; selects the retarget handedness (default: right)",
+    )
+    parser.add_argument(
+        "--topic",
+        default=None,
+        metavar="TOPIC",
+        help="input topic; defaults to /hand_input_<side>",
+    )
+    parser.add_argument(
+        "--address",
+        default=None,
+        metavar="HOST:PORT",
+        help="Wuji Hand 2 address; defaults per --side (right=%s, left=%s)"
+        % (DEFAULT_ADDRESSES["right"], DEFAULT_ADDRESSES["left"]),
+    )
+    parser.add_argument(
         "--dry-run",
         dest="control",
         action="store_false",
-        help="retarget and print only; never connect to the hand (default)",
+        help="只做重定向并打印，不连接、不使能、不下发任何指令",
     )
-    mode.add_argument(
-        "--control",
-        action="store_true",
-        help="enable and command the physical hand (requires --confirm)",
-    )
-    parser.set_defaults(control=False)
+    parser.set_defaults(control=True)
+    parser.add_argument("--rate", type=_positive_float, default=120.0, metavar="HZ")
     parser.add_argument(
-        "--confirm",
-        default="",
-        metavar="PHRASE",
-        help=f"required with --control: {CONFIRMATION_PHRASE}",
-    )
-    parser.add_argument("--rate", type=_positive_float, default=100.0, metavar="HZ")
-    parser.add_argument(
-        "--watchdog", type=_positive_float, default=0.25, metavar="SECONDS"
+        "--watchdog", type=_positive_float, default=0.2, metavar="SECONDS"
     )
     parser.add_argument(
-        "--max-speed", type=_positive_float, default=0.6, metavar="RAD_PER_SEC"
+        "--max-speed", type=_positive_float, default=8.0, metavar="RAD_PER_SEC"
     )
     parser.add_argument("--warmup-frames", type=int, default=30)
-    parser.add_argument("--kp", type=_positive_float, default=3.0)
-    parser.add_argument("--kd", type=_positive_float, default=0.05)
+    parser.add_argument("--kp", type=_positive_float, default=4.0)
+    parser.add_argument("--kd", type=_positive_float, default=0.02)
     parser.add_argument(
-        "--effort-limit", type=_positive_float, default=0.5, metavar="AMP"
+        "--effort-limit", type=_positive_float, default=1.5, metavar="AMP"
     )
     args = parser.parse_args(argv)
 
-    if args.control and args.confirm != CONFIRMATION_PHRASE:
-        parser.error(
-            "--control requires --confirm " + CONFIRMATION_PHRASE
-        )
+    if args.topic is None:
+        args.topic = f"/hand_input_{args.side}"
+    if args.address is None:
+        args.address = DEFAULT_ADDRESSES[args.side]
+
     if args.warmup_frames < 1:
         parser.error("--warmup-frames must be at least 1")
     if args.kp < 3.0:
@@ -513,6 +578,7 @@ def main() -> int:
     cli_argv = remove_ros_args(ros_argv)[1:]
     args = parse_args(cli_argv)
     config = ControllerConfig(
+        side=args.side,
         topic=args.topic,
         address=args.address,
         control=args.control,
@@ -530,7 +596,12 @@ def main() -> int:
     try:
         while rclpy.ok() and not node.shutdown_requested:
             rclpy.spin_once(node, timeout_sec=0.1)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
+        # rclpy 自己装了 SIGINT 处理器：它先关掉 context，随后 spin_once 抛的是
+        # ExternalShutdownException 而不是 KeyboardInterrupt。两者都是操作者主动
+        # 停机，不是故障 —— 不接住的话会打出一屏 traceback 并以非零码退出，
+        # 让 run_manus_wuji2.sh --side both 误报「异常退出」。
+        # 失能与断开在下面的 finally 里，无论走哪条路径都会执行。
         pass
     finally:
         node.close()

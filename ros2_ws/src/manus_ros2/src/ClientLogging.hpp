@@ -102,7 +102,7 @@ namespace ManusSDK
 		}
 
 		// Base case for recursion: no arguments left
-		static void replacePlaceholdersWithPadding(std::string&, int p_Padding) {
+		static void replacePlaceholdersWithPadding(std::string&, int) {
 			// No more arguments, so nothing to replace
 		}
 		// Replace placeholders {} with actual values (only supports empty curly brackets, no formatting)

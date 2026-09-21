@@ -82,9 +82,45 @@ extern "C"
 	/// @param p_Val 
 	CORESDK_API void TrackerData_Init(TrackerData* p_Val);
 
+	/// @brief Initializer for a TrackingSystemInfo struct
+	/// @param p_Val 
+	CORESDK_API void TrackingSystemInfo_Init(TrackingSystemInfo* p_Val);
+
+	/// @brief Initializer for a TrackingSystemSettingIp struct
+	/// @param p_Val
+	CORESDK_API void TrackerSystemSettingIp_Init(TrackerSystemSettingIp* p_Val);
+
+	/// @brief Initializer for a TrackingSystemSettingBool struct
+	/// @param p_Val
+	CORESDK_API void TrackerSystemSettingBool_Init(TrackerSystemSettingBool* p_Val);
+
+	/// @brief Initializer for a TrackerSystemSettingFile struct
+	/// @param p_Val
+	CORESDK_API void TrackerSystemSettingFile_Init(TrackerSystemSettingFile* p_Val);
+
+	/// @brief Initializer for a TrackerSystemSettingInt struct
+	/// @param p_Val
+	CORESDK_API void TrackerSystemSettingInt_Init(TrackerSystemSettingInt* p_Val);
+
+	/// @brief Initializer for a TrackerSystemSetting struct
+	/// @param p_Val
+	CORESDK_API void TrackerSystemSetting_Init(TrackerSystemSetting* p_Val);
+
+	/// @brief Initializer for a TrackerSystem struct
+	/// @param p_Val
+	CORESDK_API void TrackerSystem_Init(TrackerSystem* p_Val);
+
 	/// @brief Initializer for a ManusHost struct
 	/// @param p_Val 
 	CORESDK_API void ManusHost_Init(ManusHost* p_Val);
+
+	/// @brief Initializer for a Message struct
+	/// @param p_Val 
+	CORESDK_API void Message_Init(Message* p_Val);
+
+	/// @brief Initializer for a Reponse struct
+	/// @param p_Val 
+	CORESDK_API void Response_Init(Response* p_Val);
 
 	/// @brief Initializer for a SkeletonNode struct
 	/// @param p_Val 

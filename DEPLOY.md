@@ -24,11 +24,11 @@
 
 ## 0. 路线结论(先读这 5 行)
 
-1. **你要控的 Wuji Hand 2 不在 USB 上,在网口上**:`WH2KA01260818006 @ 192.168.1.111:7447`(Zenoh/UDP,固件 v2.6.0,右手,20 关节全在线)。`lsusb` 里那两只 `0483:2000 WUJIHAND` 被 SDK 判定为 **第一代 WujiHand**,不是 Hand 2。
+1. **你要控的 Wuji Hand 2 不在 USB 上,在网口上**:一对双手,右 `WH2KA01260818006 @ 192.168.1.111:7447`、左 `WH2JA01260813009 @ 192.168.1.110:7447`(Zenoh/UDP,各 20 关节全在线;handedness 已逐台向设备核实)。`lsusb` 里那两只 `0483:2000 WUJIHAND` 被 SDK 判定为 **第一代 WujiHand**,不是 Hand 2。
 2. **手侧不需要 Docker、不需要 wujihandcpp/wujihandros2**。Hand 2 的官方控制栈是 `wuji-sdk`(pip),而你的 **conda `wuji2` env 里已经装好了 2026.8.31**。当前 `numpy`、`PyYAML`、Jazzy `rclpy` 已验证可在该环境中同时导入。
 3. **`wuji2` env 不是白建的 —— 它是手侧的主力环境**。整条「关键点 → retarget → 驱动实体手」用它一个包就能跑通(`RetargetSession.for_hand(HandModel.WujiHand2, ...)`)。
-4. **只有 MANUS 侧需要 ROS2**:MANUS 在 Linux 上只有 C++ SDK(`libManusSDK_Integrated.so`),官方只通过 ROS2 节点 `manus_ros2` 暴露。装**系统 ROS2 Jazzy** 原生编即可——实测该 `.so` 最高只需 `GLIBC_2.29`/`GLIBCXX_3.4.26`(本机 2.39/3.4.33),`ldd` 零 not found；构建还需要 `ament_index_cpp`、rosidl 生成器和 `libncurses-dev`。**不需要 Docker。**
-5. **不要用 upstream `wuji-technology/wuji-hand-teleop` 的 Docker 全家桶** —— 它缺 submodule gitlink 必然 build 失败,而且 upstream main 已删掉 `manus_input_py`(MANUS→21点 MediaPipe 的关键一环)。用 `Fanlinfeng23/Wuji_Retargeting` 里 vendored 的那份(官方 commit `3fa5848`),并且**只编 MANUS 那 3 个包**,其余全部丢掉。
+4. **只有 MANUS 侧需要 ROS2**:MANUS 在 Linux 上只有 C++ SDK(3.2.0 起为单个 `libManusSDK-amd64.so`),官方只通过 ROS2 节点 `manus_ros2` 暴露。装**系统 ROS2 Jazzy** 原生编即可——实测该 `.so` 最高只需 `GLIBC_2.29`/`GLIBCXX_3.4.26`(本机 2.39/3.4.33),`ldd` 零 not found；构建还需要 `ament_index_cpp`、rosidl 生成器和 `libncurses-dev`。**不需要 Docker。**
+5. **`manus_ros2` / `manus_ros2_msgs` / `ManusSDK` 用 MANUS 官方 3.2.0 分发包的 `ROS2 package/`**(已 vendored 进 `ros2_ws/src/`,并带两处标了 `LOCAL PATCH` 的本地修正)。`manus_input_py` 不在官方包里,取自 `wuji-hand-teleop` commit `3fa5848`(经 `Fanlinfeng23/Wuji_Retargeting` 转手),upstream main 已删除该包。**只编这 3 个包。**
 
 **架构**:
 
@@ -38,12 +38,12 @@ manus dongle(USB)
    → manus_data_publisher (C++)
    → /manus_glove_0
    → manus_input_py
-   → /hand_input (63 floats = 21×3 MediaPipe)
+   → /hand_input_right, /hand_input_left (各 63 floats = 21×3 MediaPipe,互不阻塞)
         │
         ↓ scripts/04_manus_wuji2.py（默认 dry-run）
         RetargetSession.step() → 限位/限速/watchdog → (20,) JointCommand
                   ↓
-        192.168.1.111:7447 (以太网) → Wuji Hand 2
+        192.168.1.111:7447 → 右手 Hand 2 / 192.168.1.110:7447 → 左手 Hand 2
 ```
 
 ---
@@ -211,17 +211,17 @@ PY
 manus dongle(USB)
   → manus_data_publisher (C++)
   → /manus_glove_0
-  → manus_input_py  → /hand_input (63 floats)
+  → manus_input_py  → /hand_input_{right,left} (各 63 floats)
                             │
                             ↓ scripts/04_manus_wuji2.py
                         RetargetSession.step()
                             ↓ 逐关节限位 + 每周期限速 + watchdog
                         (20,) → JointCommand
                                       ↓
-                        192.168.1.111:7447 → Wuji Hand 2
+                        .111 → 右手 Hand 2 / .110 → 左手 Hand 2
 ```
 
-**已采用方案**:`wuji2` 是 Python 3.12.14,与 Jazzy 的 rclpy 同 ABI；本机已实测同一进程可同时接收 `/hand_input`、调用 `RetargetSession`。因此直接运行 `scripts/04_manus_wuji2.py`,**不需要 UDP 桥**。
+**已采用方案**:`wuji2` 是 Python 3.12.14,与 Jazzy 的 rclpy 同 ABI；本机已实测同一进程可同时接收 `/hand_input_*`、调用 `RetargetSession`。左右手各跑一个进程。因此直接运行 `scripts/04_manus_wuji2.py`,**不需要 UDP 桥**。
 
 > `env_ros.sh` 会刻意把 conda 从 PATH 移除，只供构建和运行系统 ROS 节点；它现在也会移除残留的 `(wuji2)` 提示符。运行 `scripts/01_read_only.py`、`02_wuji2_init.py`、`03_wuji2_test.py` 前必须重新 `source /home/mzsun/Projects/Wuji2_xyj/env.sh`，或直接使用 `/home/mzsun/miniconda3/envs/wuji2/bin/python`。`scripts/run_manus_wuji2.sh` 已自动处理两套环境，不受此限制。
 
@@ -264,14 +264,14 @@ echo "ROS_DISTRO=$ROS_DISTRO"; ros2 --help >/dev/null && echo "ros2 CLI OK"
 
 ```bash
 P=/home/mzsun/Projects/Wuji2_xyj
-MI=$P/ros2_ws/src   # 仓库化后三个包已在此,不再来自 Wuji_Retargeting
-file $MI/manus_ros2/ManusSDK/lib/libManusSDK_Integrated.so
+MI=$P/ros2_ws/src   # 仓库化后三个包已在此
+file $MI/ManusSDK/lib/amd64/libManusSDK-amd64.so   # 3.2.0 起 SDK 移到 src/ManusSDK/,单库分架构
 ls -d $MI/manus_input_py $MI/manus_ros2 $MI/manus_ros2_msgs
 ls -l $MI/manus_ros2/calibration/
 ```
 
 > 验收:`.so` 是 `ELF 64-bit LSB shared object`(**已确认**,143M/117M);三个包目录齐;`calibration/` 有两个 `.mcal`。
-> ❗ **用 `Wuji_Retargeting` 里 vendored 的这份,不要用 upstream `wuji-hand-teleop` main** —— upstream 已删掉 `manus_input_py`(MANUS→21点 MediaPipe 的关键一环),且缺 submodule gitlink。
+> ❗ 只有 `manus_input_py` 来自 `wuji-hand-teleop`(upstream main 已删除该包);其余三项来自 MANUS 官方 3.2.0 分发包。
 
 ### 步骤 3 — MANUS udev 规则
 
@@ -334,8 +334,8 @@ echo written
 > clone 之后只需先恢复 MANUS SDK 运行库:
 >
 > ```bash
-> ./tools/fetch_manus_sdk.sh /path/to/manus/sdk/lib
-> ls ros2_ws/src/        # 应为 manus_input_py manus_ros2 manus_ros2_msgs
+> ./tools/fetch_manus_sdk.sh '/path/to/MANUS_Core_3.2.0_SDK_Linux/ROS2 package/ManusSDK/lib'
+> ls ros2_ws/src/        # 应为 ManusSDK manus_input_py manus_ros2 manus_ros2_msgs
 > ```
 
 在一个子 shell 中构建。即使外层自动激活 conda base,该命令也会清理它；`cd` 或包集合不符合预期时立即退出:
@@ -357,7 +357,7 @@ echo written
 
   colcon build --symlink-install \
     --packages-select manus_ros2_msgs manus_ros2 manus_input_py \
-    --cmake-args -DCMAKE_BUILD_TYPE=Release
+    --cmake-args -DCMAKE_BUILD_TYPE=Release -DPython3_EXECUTABLE=/usr/bin/python3
 )
 ```
 
@@ -374,7 +374,9 @@ echo written
 )
 ```
 
-> 验收:三个包都在;`ldd` 里 `libManusSDK_Integrated.so => ...` **已解析**,不是 `not found`(CMakeLists 设了 `INSTALL_RPATH "$ORIGIN"`)。
+> 验收:三个包都在;`ldd` 里 `libManusSDK-amd64.so => ...` **已解析**,不是 `not found`(CMakeLists 设了 `INSTALL_RPATH "$ORIGIN"`)。
+>
+> ⚠️ `-DPython3_EXECUTABLE=/usr/bin/python3` 不能省:CMake 的自动探测会挑中 conda 的 `wuji2/bin/python3`,那个环境没有 `empy`,`rosidl` 生成消息时报 `ModuleNotFoundError: No module named 'em'`。旧的 build 缓存里存着正确值,所以清空 build 目录后才会暴露。
 > ❗ 只有 `.so` 拷到位**不算数**,必须 `manus_data_publisher` 真编出来。
 
 ### 步骤 6 — 起 MANUS 发布器,判定 license(生死关口)
@@ -406,40 +408,98 @@ grep -E "Manus Core connected|Calibration loaded successfully|publishes in the l
 > ⚠️ 跑之前确保没有别的 `manus_data_publisher` 或 Windows 端 MANUS Core 在抢 dongle——dongle 一次只接受一个客户端。
 > ⚠️ `/manus_glove_0` 是**懒创建**的,手套没真正推数据前 topic 不存在；此时 license 状态仍是“未验证”,不能判成功或失败。
 
+### 步骤 6.5 — 手套标定(MANUS Core Dashboard,Linux 原生)
+
+**没标定过、或 `tools/check_glove_live.py` 报 FAIL,就必须先做这一步。**
+用别人的标定只能验证链路通不通,谈不上精度。⚠️ 控制节点现在**默认就驱动实体手**,标定没做好时务必加 `--dry-run`。
+
+3.2.0 的官方分发包自带 **Linux 版 Core Dashboard**(Unity 应用)。注意包里
+`Getting started.md` 仍写着 "MANUS Core itself is only available on Windows",
+那是没更新的旧文案,与它自己 ship 的 Linux 构建矛盾。
+
+标定期间 **Core 要独占手套连接**,必须先停掉 `manus_data_publisher`。
+
+```bash
+# 1. 停掉所有占用手套的进程
+pkill -f manus_data_publisher; pkill -f manus_input
+pgrep -af 'manus_data_publisher|manus_input' || echo "OK: 已全部退出"
+
+# 2. 启动 Core Dashboard（包里没带执行位,首次要 chmod）
+cd "$WUJI2_ROOT/MANUS_Core_3.2.0_SDK_Linux/MANUS Core Dashboard (Linux build)"
+chmod +x MANUS_Core
+DISPLAY=:1 ./MANUS_Core          # DISPLAY 取本机实际的图形会话号
+```
+
+在 Dashboard 里完成右手标定,导出 `.mcal`,覆盖到仓库:
+
+```bash
+cp <导出的文件> "$WUJI2_ROOT/ros2_ws/src/manus_ros2/calibration/RightMetaglovePro.mcal"
+```
+
+**两道校验,都过了才算标定成功:**
+
+```bash
+# a) 文件自洽性：side 标签 vs 几何手性、腕旋转偏移、各指长度
+python3 "$WUJI2_ROOT/tools/check_mcal.py" \
+  "$WUJI2_ROOT/ros2_ws/src/manus_ros2/calibration/RightMetaglovePro.mcal"
+
+# b) 传感器读数：重启发布器后,摊平手
+source "$WUJI2_ROOT/env_ros.sh"
+ros2 run manus_ros2 manus_data_publisher &
+python3 "$WUJI2_ROOT/tools/check_glove_live.py"
+```
+
+> 验收:`check_mcal.py` 输出「自洽性检查全部通过」;`check_glove_live.py` 输出
+> 「全部接近零位」。`manus_data_publisher` 终端里应出现
+> `Calibration loaded successfully for Right glove (ID: ...)`。
+>
+> ⚠️ 若报 `VersionError`,说明 `.mcal` 格式与当前 SDK 不匹配 —— 检查是否用了
+> 不同版本的 Core 导出。
+>
+> ⚠️ `CoreSdk_SetGloveCalibration` **不校验**文件内的几何属于哪一侧:一份
+> `side` 标着 `right`、内容却是左手的文件会被静默接受,下游表现为关节角离谱、
+> 手指朝腕部折回。`check_mcal.py` 就是挡这个的,别跳过。
+
+另一条路是官方 `C++/SDKClient`(FTXUI 终端向导,菜单第 3 项 Calibration),
+`install-dependencies.sh` 和 CMakeLists 都在包里。Integrated 模式的依赖只需
+`build-essential libusb-1.0-0-dev zlib1g-dev libudev-dev libncurses5-dev gdb`。
+
+---
+
 ### 步骤 7 — 起 manus_input,拿到 21 点 MediaPipe
 
 ```bash
 source /home/mzsun/Projects/Wuji2_xyj/env_ros.sh
 ros2 run manus_input_py manus_input \
-  --config "$WUJI2_ROOT/config/manus_input_right_only.yaml"
+  --config "$WUJI2_ROOT/config/manus_input_both_hands.yaml"   # 单手用 manus_input_right_only.yaml
 ```
 
 另开终端:
 
 ```bash
 source /home/mzsun/Projects/Wuji2_xyj/env_ros.sh
-timeout 12 ros2 topic hz /hand_input
-timeout 12 ros2 topic echo /hand_input --once \
+timeout 12 ros2 topic hz /hand_input_right
+timeout 12 ros2 topic echo /hand_input_right --once \
   --qos-reliability best_effort > /tmp/hand_input_once.yaml
 
 /usr/bin/python3 - <<'PY'
 import yaml
 msg = next(x for x in yaml.safe_load_all(open("/tmp/hand_input_once.yaml")) if x)
 n = len(msg["data"])
-print("hand_input length:", n)
+print("hand_input_right length:", n)
 assert n == 63, f"expected 63 floats for right hand, got {n}"
 PY
 ```
 
-> 验收:`/hand_input` ≈ 120 Hz,脚本打印 `hand_input length: 63`。
-> ❗ **默认配置是双手 → 126**。必须用 `manus_input_right_only.yaml`(`include_left_hand: false`)。
+> 验收:`/hand_input_right` ≈ 120 Hz,脚本打印 `hand_input_right length: 63`。双手时 `/hand_input_left` 同样 63。
+> ✅ **已改为每只手各发各的 topic,各 63 floats**。上游把两只手拼成 126 floats 且任一只手缺数据就整体不发(左手掉线会连带停掉右手),本仓库拆开了。
 > ❗ `ros2 topic echo` **必须带 `--qos-reliability best_effort`** —— 链路里所有 publisher 都是 BEST_EFFORT,否则会出现“订阅成功但无数据”的假故障。
 
 ### 步骤 8 — 启动 Hand 2 重定向节点（先 dry-run）
 
 本仓库现已提供：
 
-- `scripts/04_manus_wuji2.py`：`/hand_input` → 官方 `RetargetSession` → Hand 2；
+- `scripts/04_manus_wuji2.py --side right|left`：`/hand_input_<side>` → 官方 `RetargetSession` → 对应的 Hand 2；
 - `scripts/run_manus_wuji2.sh`：加载 ROS overlay 并固定使用 `wuji2` Python 的启动器。
 
 实现依据：[Wuji Hand 2 控制指南](https://docs.wuji.tech/docs/zh/wuji-hand/latest/control-guide/)、[Wuji Hand 2 SDK 接口](https://docs.wuji.tech/docs/zh/wuji-hand/latest/sdk-reference/) 和 [Wuji SDK 手部重定向](https://docs.wuji.tech/docs/zh/wuji-sdk/latest/retargeting/)。
@@ -462,7 +522,9 @@ cd /home/mzsun/Projects/Wuji2_xyj
 
 dry-run **不会连接 Hand 2、不会 `enable()`、不会发送命令**。本机已用实时 `/hand_input` 验证：能稳定接收约 120 Hz 输入，日志中的 `age` 约 0–7 ms，并按 `thumb/index/middle/ring/pinky` 打印全部 20 个 qpos（rad），静止时 `clamped_now=0`。
 
-节点已实现以下安全门：BEST_EFFORT/depth=1、63 长度与 NaN/Inf 检查、MediaPipe 米制尺度检查、官方 Beta 2 的 20 轴运动范围 clamp、默认 `0.6 rad/s` 每轴限速、`0.25 s` 输入 watchdog、诊断错误检查、显式 `192.168.1.111:7447` 连接，以及所有退出/异常路径失能并断开。
+节点已实现以下安全门：BEST_EFFORT/depth=1、63 长度与 NaN/Inf 检查、MediaPipe 米制尺度检查、首帧骨架尺寸与手性自检、20 轴运动范围 clamp、每轴限速、输入 watchdog、关节故障按固件四级 severity 分级（`Warning` 不停机）、以及所有退出/异常路径失能并断开。
+
+> ⚠️ **控制节点已改为默认驱动实体手**，`--dry-run` 才是只打印。原先的 `--control` + 确认短语那道闸已移除。
 
 > 官方 SDK 文档明确规定 `RetargetSession.step()` 接受 `(21,3)` MediaPipe 顺序、单位米，返回可直接下发的 `(20,)`。当前 `/hand_input` 实测腕到最远点约 `0.18 m`，顺序和尺度均符合；但方向和动作语义仍必须由操作者在 dry-run 中逐指核对。
 >
@@ -472,7 +534,7 @@ dry-run **不会连接 Hand 2、不会 `enable()`、不会发送命令**。本�
 
 不要直接调用 `hand.set_origin()`。按以下顺序判断：
 
-1. 停止实体控制，只运行 `./scripts/run_manus_wuji2.sh --dry-run`，戴着手套并拢、伸直五指。
+1. 停止实体控制，只运行 `./scripts/run_manus_wuji2.sh --side right --dry-run`，戴着手套并拢、伸直五指。
 2. 观察四指侧摆轴：`index/middle/ring/pinky` 每组的第 2 个值，即索引 `5/9/13/17`（`*_S2`）。若这些目标本身明显同向偏离 0，说明偏斜来自 MANUS 骨架/retarget 输入，而不是 Hand 2 擅自偏转。
 3. 当前现场实测伸直姿态仍得到 `index_S2≈+0.444 rad`、`middle_S2≈+0.339 rad`，足以产生明显侧摆；仓库加载的又是通用 `RightMetaglovePro.mcal`。因此应先在 Windows MANUS Core 中为当前佩戴者重新完成 Metaglove Pro 标定，并在 Raw Skeleton Data 视图检查五指伸直、屈曲与逐指捏合。官方建议每次使用前重新标定。
 4. 从 MANUS Core 导出右手 `.mcal`，备份并替换：
@@ -493,19 +555,23 @@ cp /你的导出路径/RightMetaglovePro.mcal "$CAL"
 当前完整链路为：
 
 ```text
-MANUS dongle → manus_data_publisher → /manus_glove_0
-  → manus_input_py → /hand_input (63 floats)
-  → 04_manus_wuji2.py → RetargetSession → 安全控制器 → Wuji Hand 2
+MANUS dongle → manus_data_publisher → /manus_glove_0, /manus_glove_1
+  → manus_input_py → /hand_input_right, /hand_input_left
+  → 04_manus_wuji2.py --side right → RetargetSession → 安全控制器 → 右手 Hand 2 (.111)
+  → 04_manus_wuji2.py --side left  → RetargetSession → 安全控制器 → 左手 Hand 2 (.110)
 ```
 
-下面的 A–D 是每次开机后的完整顺序。A/B 是常驻进程，C 是一次性验收，D 先 dry-run，人工确认后才可改为实体控制。
+下面的 A–E 是每次开机后的完整顺序。A/B 是常驻进程，C 是一次性验收，D/E 分别驱动右手和左手。
+
+> ⚠️ **D/E 默认就会连接并驱动实体手。** 换过标定、改过取点逻辑、升过 SDK 之后，
+> 第一次务必先加 `--dry-run` 过一遍，确认 qpos 合理、无轴顶限位，再去掉该参数。
 
 #### 9.0 首次启动前的一次性条件
 
 - 步骤 1–5 已完成,且 `ros2_ws/install/setup.bash` 存在。
 - `colcon build` 的结果为三包成功、零失败。
 - 已确认没有 `wuji-studio`、旧 `manus_data_publisher` 或 Windows MANUS Core 抢设备。
-- MANUS dongle 已插入；Hand 2 网线、电源和 `192.168.1.111` 路由正常。
+- MANUS dongle 已插入；两只 Hand 2 的网线、电源和 `192.168.1.110` / `.111` 路由正常。
 
 ```bash
 test -f /home/mzsun/Projects/Wuji2_xyj/ros2_ws/install/setup.bash || {
@@ -514,7 +580,8 @@ test -f /home/mzsun/Projects/Wuji2_xyj/ros2_ws/install/setup.bash || {
 }
 
 pgrep -af 'wuji-studio|wuji-hand-hmi|manus_data_publisher' || true
-ping -c 2 -W 1 192.168.1.111
+ping -c 2 -W 1 192.168.1.111   # 右手
+ping -c 2 -W 1 192.168.1.110   # 左手
 lsusb -d 3325:0049
 ```
 
@@ -529,15 +596,26 @@ ros2 run manus_ros2 manus_data_publisher 2>&1 | tee /tmp/manus.log
 
 保持此终端运行。必须看到 `Manus Core connected`；随后按步骤 6 同时检查 license 错误和 calibration/publish 正向日志。
 
-#### 9.2 终端 B:启动右手关键点转换
+#### 9.2 终端 B:启动关键点转换（双手）
 
 ```bash
 source /home/mzsun/Projects/Wuji2_xyj/env_ros.sh
 ros2 run manus_input_py manus_input \
-  --config "$WUJI2_ROOT/config/manus_input_right_only.yaml"
+  --config "$WUJI2_ROOT/config/manus_input_both_hands.yaml"   # 单手用 manus_input_right_only.yaml
 ```
 
-保持此终端运行。它订阅 `/manus_glove_0`/`_1`,按消息的 `side` 字段选右手,并发布 63 个 float 到 `/hand_input`。
+保持此终端运行。它订阅 `/manus_glove_0`/`_1`,按消息的 `side` 字段分流,
+分别发布 63 个 float 到 `/hand_input_right` 与 `/hand_input_left`。两只手互不阻塞:
+一只手套掉线不会连带停掉另一只。
+
+启动时每只手各打一行骨架自检:
+
+```text
+[骨架自检 Right] 腕->中指MCP=9.4cm MCP展宽=8.4cm 食指近节=4.4cm 手性=-6.0e-02(可信度6.1cm)
+```
+
+> 手性判据在**手指伸直时会退化**,此时会打 WARN 说「无法判定」,那不是故障 ——
+> 弯曲手指后重启本节点即可看到确定结论。**右手应为负、左手应为正。**
 
 #### 9.3 终端 C:统一运行状态验收
 
@@ -575,33 +653,62 @@ grep -E 'Manus Core connected|Calibration loaded successfully|publishes in the l
 
 `SDK Integrated license` 必须单独判定。当前现场日志是“持续发布约 120 Hz，**同时报告 license 无效**”：这证明数据当前可读，但授权健康检查仍为失败，不能写成 license OK；应联系 MANUS 修正 license，尤其不能据此做无人值守运行。
 
-#### 9.4 终端 D：先 dry-run，再由人工显式进入实体控制
+#### 9.4 终端 D/E：右手与左手
 
-先运行至少 30 秒 dry-run，并依次做开掌、单指弯曲、握拳：
+> ⚠️ **控制节点默认就会连接、使能并驱动实体手。** 早期版本默认 dry-run、实体控制
+> 需 `--control` 加确认短语，那道闸已移除。换过标定、改过取点逻辑、升过 SDK 之后，
+> 第一次务必先加 `--dry-run` 过一遍。
+
+先各跑至少 30 秒 dry-run，依次做开掌、单指弯曲、握拳：
 
 ```bash
 cd /home/mzsun/Projects/Wuji2_xyj
-./scripts/run_manus_wuji2.sh --dry-run
+./scripts/run_manus_wuji2.sh --side both --dry-run    # 一个终端管两只手
+```
+
+也可以分两个终端起，那样能给每只手不同参数：
+
+```bash
+./scripts/run_manus_wuji2.sh --side right --dry-run   # 终端 D
+./scripts/run_manus_wuji2.sh --side left  --dry-run   # 终端 E
 ```
 
 验收要求：
 
 - 日志持续显示 `[dry-run] frames=... age=... qpos(rad) thumb=... index=...`；
 - 戴着手套动作时 qpos 平滑变化，静止时不持续漂移；
-- 对应手指与运动方向正确；
+- 对应手指与运动方向正确，**左手要单独核对一遍，不能假定和右手镜像就一定对**；
 - `clamped_now` 正常为 0，不出现尺度或 NaN/Inf 拒收；
 - 这一阶段 Hand 2 不会连接、不会使能、不会运动。
 
-通过后 `Ctrl+C` 停止 dry-run。清空手的运动空间，确认无人接触、皮肤层已装好、急停方案可用，再运行实体模式：
+通过后清空手的运动空间，确认无人接触、皮肤层已装好、急停方案可用，去掉 `--dry-run`：
 
 ```bash
-cd /home/mzsun/Projects/Wuji2_xyj
-./scripts/run_manus_wuji2.sh \
-  --control \
-  --confirm I_UNDERSTAND_THIS_MOVES_HARDWARE
+./scripts/run_manus_wuji2.sh --side both     # 双手，直接驱动
 ```
 
-默认实体参数为官方建议的首次低限幅：`kp=3.0`、`kd=0.05`、`effort_limit=0.5 A`，每轴最大 `0.6 rad/s`。程序先等待 30 帧有效新鲜输入，再检查 20 轴在线、错误码、当前位置和官方限位，然后才 enable。SDK 连接期间 ROS 单线程回调会暂停，因此 enable 后会重新等待一帧真正的新输入，再启动下发并启用 0.25 秒 watchdog；若新帧 1 秒内未到，同样立即失能。正常控制期间输入超过 0.25 秒未更新、关节报错、离开 Enabled 状态或任意异常都会关闭 publisher、失能并断开；发生 fail-safe 后必须排查并重启程序。
+`--side both` 起**两个独立进程**（不是一个进程管两只手 —— SDK 的连接/使能是阻塞
+调用，同进程会互相卡住；一只手 fail-safe 也会带走另一只）。脚本转发 Ctrl+C 并等
+两个子进程失能退出。**一只手异常退出时另一只继续运行**，脚本会打出提示；要全停
+就 Ctrl+C。`--side both` 不接受 `--topic` / `--address`，因为它们对两只手含义不同。
+
+`--side` 决定重定向手别、默认 topic（`/hand_input_<side>`）、ROS 节点名和 Hand 2 地址
+（右 `192.168.1.111:7447`、左 `192.168.1.110:7447`）。两个进程完全独立，一只手
+fail-safe 不会影响另一只。
+
+默认参数面向实时跟随：`rate=120Hz`、`max_speed=8.0 rad/s`、`kp=4.0`、`kd=0.02`、
+`effort_limit=1.5A`、`watchdog=0.2s`。首次上电或换了标定建议先用保守值：
+
+```bash
+./scripts/run_manus_wuji2.sh --side right \
+  --max-speed 2.0 --kp 3.0 --kd 0.05 --effort-limit 0.5
+```
+
+程序先等 30 帧有效新鲜输入，再检查 20 轴在线、错误码、当前位置和限位，然后才 enable。
+SDK 连接期间 ROS 单线程回调会暂停，因此 enable 后会重新等待一帧真正的新输入再下发。
+正常控制期间输入超时、关节报出 `DeferredStop` 及以上级别故障、离开 Enabled 状态或
+任意异常，都会关闭 publisher、失能并断开。`Warning` 级故障（如 `Enc1BitRate`）
+只限流记录、不停机。
 
 仍然**不要**运行以下旧 launch 文件：
 
@@ -610,25 +717,25 @@ Wuji_Retargeting/launch/manus_wuji_right.launch.py
 Wuji_Retargeting/wuji-hand-teleop/src/wuji_teleop_bringup/launch/wuji_teleop_hand.launch.py
 ```
 
-它们会启动 `wujihand_driver`/`wujihand_controller`,走的是一代 USB 手和 `wujihandpy/wujihandros2` 栈,不是 `192.168.1.111:7447` 上的 Wuji Hand 2。`legacy/src/manus_wuji_retarget.py --output-mode sdk` 也导入一代 `wujihandpy`,同样不能使用。
+它们会启动 `wujihand_driver`/`wujihand_controller`,走的是一代 USB 手和
+`wujihandpy/wujihandros2` 栈,不是网口上的 Wuji Hand 2。
 
 最终启动顺序：
 
 ```text
 终端 A MANUS publisher
-  → 终端 B manus_input
-  → 终端 C 验收 /hand_input
-  → 终端 D 04_manus_wuji2.py --dry-run
-  → 人工检查 qpos/限位/方向
-  → 停止 dry-run
-  → 终端 D 使用 --control + 确认短语，才允许 enable Hand 2
+  → 终端 B manus_input（双手）
+  → 终端 C 验收 /hand_input_right 与 /hand_input_left
+  → --side both --dry-run
+  → 人工逐手检查 qpos/限位/方向（左手要单独核对，不能假定镜像就对）
+  → 去掉 --dry-run，进入实体控制
 ```
 
 #### 9.5 停止顺序
 
 必须逆序停止:
 
-1. 若已启动终端 D，先 `Ctrl+C` 停止控制节点，确认日志出现 `hand disabled`（dry-run 没有该行，因为它从未连接手）。
+1. 若已启动终端 D/E，先分别 `Ctrl+C` 停止两个控制节点，确认各自日志出现 `hand disabled`（dry-run 没有该行，因为它从未连接手）。
 2. 在终端 B `Ctrl+C` 停止 `manus_input`。
 3. 在终端 A `Ctrl+C` 停止 `manus_data_publisher`。
 4. 最后检查没有残留节点或进程:
@@ -664,7 +771,7 @@ A–C 从不 enable Hand 2；只有带双重确认的终端 D 实体模式有权
 | 项 | 状态 | 说明 |
 |---|---|---|
 | **MANUS dongle 的 SDK license** | ❌ 当前日志判定无效 | `3325:0049`(serial `082AC6A4`)硬件已识别，且当前仍能发布约 120 Hz 数据，但日志明确出现 `don't have a valid SDK Integrated license`。license 存在一个**必须全程插着 USB 的物理 key** 上；修复需按 MANUS 授权流程处理，不能把“当前有数据”误记为 license 通过。 |
-| **MANUS SDK 从哪下** | ✅ 不用下 | 仓库通过 Git LFS 自带 `libManusSDK.so`(143MB)+ `libManusSDK_Integrated.so`(117MB),`git lfs pull` 即可。若要换新版,官方包名是 `MANUS_Core_3.1.1_SDK.zip`(`docs.manus-meta.com/latest/Resources/`),但**除非跑不通否则别动** |
+| **MANUS SDK 从哪下** | ✅ 已有 3.2.0 | 官方分发包 `MANUS_Core_3.2.0_SDK_Linux`(约 867MB,含 Linux 版 Core Dashboard、C++/Python 示例、ROS2 包)。**不入库**(见 `.gitignore`),运行库用 `tools/fetch_manus_sdk.sh` 恢复。3.2.0 起 SDK 合并为单个分架构的 `libManusSDK-<arch>.so`(amd64 约 20.7MB),取代旧的两库共 261MB |
 | **`.mcal` 个人标定** | ⚠️ 需要 Windows | 仓库自带通用 `LeftMetaglovePro.mcal` / `RightMetaglovePro.mcal`(各 ~3.8KB),**可以先用它跑通链路**,但那是别人的手型,精度明显下降。个人标定只能在 **Windows 的 MANUS Core** 里做完导出。文件名硬编码,必须精确覆盖同名文件 |
 | **`1915:83fd` 无线收发器** | ❓ | 当前 `lsusb -d 1915:` 无输出。若你的 Metagloves Pro 靠它通信而非 dongle 直连,现在硬件不完整,会出现"手套枚举正常但骨架数据为空" |
 | **手的序列号** | ✅ 已确认 | Hand 2:`WH2KA01260818006`(SN[3]=`K` → 右手;`A01` → Beta 2 硬件),IP `192.168.1.111`。一代手:`367C39563134`(sysfs `3-7`)/ `306735773434`(`3-8`) |
@@ -700,7 +807,7 @@ A–C 从不 enable Hand 2；只有带双重确认的终端 D 实体模式有权
 [ ] source /opt/ros/jazzy/setup.bash  →  ROS_DISTRO=jazzy
 [ ] env_ros.sh 后 python3=/usr/bin/python3；colcon list 恰好三包；Summary: 3 packages finished / 0 failed
 [ ] ros2 pkg list | grep manus  →  manus_ros2 / manus_ros2_msgs / manus_input_py 三行
-[ ] ldd manus_data_publisher | grep manus  →  libManusSDK_Integrated.so => ... (已解析,非 not found)
+[ ] ldd manus_data_publisher | grep manus  →  libManusSDK-amd64.so => ... (已解析,非 not found)
 [ ] conda python 能同时 import yaml/rclpy/std_msgs/wuji_sdk/numpy
 [ ] ./scripts/run_manus_wuji2.sh --dry-run 持续输出 20 维 qpos，方向正确且 clamped_now=0
 [ ] 实体模式前已清空工作区，并明确输入 --control 与完整确认短语

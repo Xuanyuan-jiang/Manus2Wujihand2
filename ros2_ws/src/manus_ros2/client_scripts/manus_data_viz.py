@@ -53,7 +53,7 @@ class MinimalSubscriber(Node):
             self.glove_viz_map[msg.glove_id] = GloveViz(msg.glove_id)
 
         glove_viz = self.glove_viz_map[msg.glove_id]
-        unused_list = [25,2,7,12,17] # thumb,index,middle,ring,little
+
         # Store new node positions for line drawing
         glove_viz.node_positions = {}
 
@@ -61,27 +61,25 @@ class MinimalSubscriber(Node):
         for node in msg.raw_nodes:
             pose = node.pose
             node_id = node.node_id
-            print(node_id)
-            if node_id not in unused_list:
 
             # Store node position for line drawing
-                glove_viz.node_positions[node_id] = np.array([pose.position.x, -pose.position.y, pose.position.z])
+            glove_viz.node_positions[node_id] = np.array([pose.position.x, pose.position.y, pose.position.z])
 
-                if node_id not in glove_viz.node_meshes:
-                    # Create a sphere for the node
-                    mesh = o3d.geometry.TriangleMesh.create_sphere(radius=0.005)
-                    mesh.compute_vertex_normals()  # Enable shading
-                    #mesh.paint_uniform_color([0.5, 0.5, 0.5])  # Gray color
-                    glove_viz.node_meshes[node_id] = mesh
-                    glove_viz.viz.add_geometry(mesh)
+            if node_id not in glove_viz.node_meshes:
+                # Create a sphere for the node
+                mesh = o3d.geometry.TriangleMesh.create_sphere(radius=0.005)
+                mesh.compute_vertex_normals()  # Enable shading
+                #mesh.paint_uniform_color([0.5, 0.5, 0.5])  # Gray color
+                glove_viz.node_meshes[node_id] = mesh
+                glove_viz.viz.add_geometry(mesh)
 
-                mesh = glove_viz.node_meshes[node_id]
+            mesh = glove_viz.node_meshes[node_id]
 
-                # Translate to correct position
-                mesh.translate(-np.asarray(mesh.get_center()), relative=True)  # Reset position
-                mesh.translate([pose.position.x, -pose.position.y, pose.position.z], relative=False)
+            # Translate to correct position
+            mesh.translate(-np.asarray(mesh.get_center()), relative=True)  # Reset position
+            mesh.translate([pose.position.x, pose.position.y, pose.position.z], relative=False)
 
-                glove_viz.viz.update_geometry(mesh)
+            glove_viz.viz.update_geometry(mesh)
 
         # Update line connections
         self.update_lines(glove_viz, msg)

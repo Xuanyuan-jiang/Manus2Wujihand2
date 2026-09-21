@@ -1,0 +1,8 @@
+# 双手：左右各发各的 topic（/hand_input_right、/hand_input_left），互不阻塞。
+# 一只手套掉线不会影响另一只 —— 这是相对上游实现的关键改动。
+publish_rate_hz: 120.0
+publish_hand_topic: /hand_input_{side}
+include_right_hand: true
+include_left_hand: true
+left_glove_id: 0
+right_glove_id: 1

@@ -445,7 +445,7 @@ void SDKClientPlatformSpecific::UpdateInput(void)
 bool SDKClientPlatformSpecific::ResizeWindow(
 	const short int p_ConsoleWidth,
 	const short int p_ConsoleHeight,
-	const short int p_ConsoleScrollback)
+	const short int /*p_ConsoleScrollback*/)
 {
 	// https://apple.stackexchange.com/questions/33736/can-a-terminal-window-be-resized-with-a-terminal-command/47841#47841
 	// Use a control sequence to resize the window.
@@ -456,7 +456,7 @@ bool SDKClientPlatformSpecific::ResizeWindow(
 	// 8;   -> resize the window
 	// y;xt -> The first number is the height, the second the width.
 	// Scrollback can't and doesn't need to be set here for Linux.
-	printf("\e[8;%d;%dt", p_ConsoleHeight, p_ConsoleWidth);
+	printf("\033[8;%d;%dt", p_ConsoleHeight, p_ConsoleWidth);
 
 	ClearConsole();
 
@@ -473,7 +473,7 @@ bool SDKClientPlatformSpecific::ResizeWindow(
 void SDKClientPlatformSpecific::ApplyConsolePosition(
 	const int p_ConsoleCurrentOffset)
 {
-	printf("\e[%d;1H", p_ConsoleCurrentOffset);
+	printf("\033[%d;1H", p_ConsoleCurrentOffset);
 }
 
 /*static*/ void SDKClientPlatformSpecific::ClearConsole(void)

@@ -12,9 +12,12 @@ __pycache__/
 log.txt
 *.log
 
-# --- MANUS SDK 运行库 ---
-# 闭源商业件，两个文件共约 250 MB，且源树内无 license/EULA。
-# 不入库，用 tools/fetch_manus_sdk.sh 从本机 SDK 安装位置恢复。
+# --- MANUS SDK ---
+# 闭源商业件，使用需带 SDK feature 的 MANUS license key，不入库。
+# 官方分发包（约 867 MB，含 Linux 版 Core Dashboard、C++/Python 示例、ROS2 包）
+MANUS_Core_3.2.0_SDK_Linux/
+# 运行库，用 tools/fetch_manus_sdk.sh 恢复
+ros2_ws/src/ManusSDK/lib/
 ros2_ws/src/manus_ros2/ManusSDK/lib/*.so
 ros2_ws/src/manus_ros2/ManusSDK/lib/*.so.*
 
