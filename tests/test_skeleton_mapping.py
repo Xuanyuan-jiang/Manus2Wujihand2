@@ -29,11 +29,13 @@ FINGER_GEOMETRY = {
     "Ring": ((0.008, 0.0, 0.020), (0.015, 0.0, 0.094), (0.016, 0.0, 0.140), (0.017, 0.0, 0.166), (0.017, 0.0, 0.186)),
     "Pinky": ((0.020, 0.0, 0.020), (0.040, 0.0, 0.084), (0.042, 0.0, 0.120), (0.043, 0.0, 0.140), (0.044, 0.0, 0.158)),
 }
-# 拇指没有 Distal：掌骨根(=CMC) / 近节根(=MCP) / 中节根(=IP) / 指尖
+# 拇指只有近节、远节两根指骨，没有中节(Intermediate)。实机数据证实拇指链为
+# [Metacarpal, Proximal, Distal, Tip]，其唯一的 IP 关节在远节指骨根部。
+# 掌骨根(=CMC) / 近节根(=MCP) / 远节根(=IP) / 指尖
 THUMB_GEOMETRY = ((-0.024, 0.0, 0.018), (-0.045, 0.0, 0.052), (-0.062, 0.0, 0.080), (-0.074, 0.0, 0.101))
 
 FINGER_BONES = ("Metacarpal", "Proximal", "Intermediate", "Distal", "Tip")
-THUMB_BONES = ("Metacarpal", "Proximal", "Intermediate", "Tip")
+THUMB_BONES = ("Metacarpal", "Proximal", "Distal", "Tip")
 
 # manus_ros2 当前（未修）的 JointTypeToString 输出
 LEGACY_LABEL = {

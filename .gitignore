@@ -21,8 +21,3 @@ ros2_ws/src/manus_ros2/ManusSDK/lib/*.so.*
 # --- 编辑器 ---
 .vscode/
 *.swp
-
-# --- 待删除 ---
-# 旧参考仓库。三个 MANUS 包已 vendor 到 ros2_ws/src/，
-# 确认 colcon build 通过后可整个删除，届时移除本条。
-/Wuji_Retargeting/

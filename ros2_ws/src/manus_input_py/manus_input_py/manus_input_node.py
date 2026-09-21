@@ -36,8 +36,14 @@ SEMANTIC_CHAIN_NAMES = ("Thumb", "Index", "Middle", "Ring", "Pinky")
 #
 # 拇指从掌骨起算（MediaPipe 的 THUMB_CMC 正是掌骨根），四指从近节指骨起算。
 # 这个差别是解剖学事实，不是特例处理。
+#
+# 拇指只有近节、远节两根指骨，没有中节，所以链里**没有 Intermediate**，
+# 而它唯一的 IP 关节就在远节指骨的根部 —— 实机数据证实拇指链为
+# [Metacarpal, Proximal, Distal, Tip]。
+# 注意 ManusSDKTypes.h 中 "//thumb doesn't have it" 这句注释标在了 Distal 行上，
+# 是标错了行：拇指缺的是 Intermediate。
 MEDIAPIPE_BONE_CHAIN = {
-    "Thumb": ("Metacarpal", "Proximal", "Intermediate", "Tip"),   # CMC, MCP, IP,  TIP
+    "Thumb": ("Metacarpal", "Proximal", "Distal", "Tip"),         # CMC, MCP, IP,  TIP
     "Index": ("Proximal", "Intermediate", "Distal", "Tip"),       # MCP, PIP, DIP, TIP
     "Middle": ("Proximal", "Intermediate", "Distal", "Tip"),
     "Ring": ("Proximal", "Intermediate", "Distal", "Tip"),
