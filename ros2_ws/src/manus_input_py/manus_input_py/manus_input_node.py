@@ -29,17 +29,32 @@ except ImportError as exc:
 from manus_ros2_msgs.msg import ManusGlove
 
 
-# Mapping from MediaPipe index to Manus node_id
-# MediaPipe: 0=WRIST, 1-4=THUMB, 5-8=INDEX, 9-12=MIDDLE, 13-16=RING, 17-20=PINKY
-MEDIAPIPE_TO_MANUS = (
-    1, 22, 23, 24, 25,  # WRIST + THUMB
-    3, 4, 5, 6,          # INDEX
-    8, 9, 10, 11,        # MIDDLE
-    13, 14, 15, 16,      # RING
-    18, 19, 20, 21       # PINKY
-)
-
 SEMANTIC_CHAIN_NAMES = ("Thumb", "Index", "Middle", "Ring", "Pinky")
+
+# MANUS 的骨骼节点位于每根**骨头的根部**，所以「近节指骨的根」就是 MCP 关节。
+# MediaPipe: 0=WRIST, 1-4=THUMB, 5-8=INDEX, 9-12=MIDDLE, 13-16=RING, 17-20=PINKY
+#
+# 拇指从掌骨起算（MediaPipe 的 THUMB_CMC 正是掌骨根），四指从近节指骨起算。
+# 这个差别是解剖学事实，不是特例处理。
+MEDIAPIPE_BONE_CHAIN = {
+    "Thumb": ("Metacarpal", "Proximal", "Intermediate", "Tip"),   # CMC, MCP, IP,  TIP
+    "Index": ("Proximal", "Intermediate", "Distal", "Tip"),       # MCP, PIP, DIP, TIP
+    "Middle": ("Proximal", "Intermediate", "Distal", "Tip"),
+    "Ring": ("Proximal", "Intermediate", "Distal", "Tip"),
+    "Pinky": ("Proximal", "Intermediate", "Distal", "Tip"),
+}
+
+# manus_ros2 的 JointTypeToString 把 SDK 按骨头命名的枚举翻译成按关节命名的
+# 字符串时整体错了一位（Proximal -> "PIP"、Intermediate -> "IP"）。这张表把那些
+# 旧标签翻译回骨头名，因此本节点对修好前后的 manus_ros2 都能正常工作。
+# 一旦 JointTypeToString 改为直接输出骨头名，这里的键不再命中，直接透传。
+LEGACY_JOINT_TYPE_ALIASES = {
+    "MCP": "Metacarpal",
+    "PIP": "Proximal",
+    "IP": "Intermediate",
+    "DIP": "Distal",
+    "TIP": "Tip",
+}
 
 
 @dataclass
@@ -100,6 +115,8 @@ class ManusInputNode(Node):
         # Freshness flag: only publish when new data arrives from C++ layer
         # Prevents infinite re-publishing of stale data causing dexterous hand jitter after glove disconnects
         self._new_data_received: bool = False
+        # 首帧做一次骨架尺寸自检并打印,只做一次
+        self._skeleton_checked: bool = False
 
         # Configure QoS for real-time performance
         qos_profile = QoSProfile(
@@ -128,31 +145,63 @@ class ManusInputNode(Node):
         )
 
     def _convert_to_mediapipe(self, msg: ManusGlove) -> np.ndarray:
-        """Convert Manus raw nodes to MediaPipe (21, 3) format."""
-        # Store Manus node positions by node_id
-        manus_positions = {}
+        """Convert Manus raw nodes to MediaPipe (21, 3) format.
 
+        按 (chain_type, 骨头) 语义选点,不使用硬编码 node_id。原实现用一张写死的
+        node_id 表,每根手指取到的是 [掌骨根, MCP, PIP, DIP] —— 比 MediaPipe 要的
+        [MCP, PIP, DIP, TIP] 整体向近端错了一节,指尖从未发布。
+        """
+        by_chain: Dict[str, Dict[str, list]] = {}
         for node in msg.raw_nodes:
-            node_id = node.node_id
-            pose = node.pose
+            bone = LEGACY_JOINT_TYPE_ALIASES.get(node.joint_type, node.joint_type)
+            by_chain.setdefault(node.chain_type, {}).setdefault(bone, []).append(node)
 
-            # Position with Y-axis flipped (same as manus_data_viz)
-            x = pose.position.x
-            y = -pose.position.y
-            z = pose.position.z
+        hand_bones = by_chain.get("Hand")
+        if not hand_bones:
+            self.get_logger().error("raw_nodes 中没有 chain_type='Hand' 的腕部节点")
+            return np.zeros((21, 3), dtype=np.float32)
+        wrist = min(
+            (node for nodes in hand_bones.values() for node in nodes),
+            key=lambda item: item.node_id,
+        )
 
-            manus_positions[node_id] = np.array([x, y, z], dtype=np.float32)
+        mediapipe_pose = [self._node_position(wrist)]
+        for chain_name in SEMANTIC_CHAIN_NAMES:
+            bones = by_chain.get(chain_name, {})
+            for bone_name in MEDIAPIPE_BONE_CHAIN[chain_name]:
+                candidates = bones.get(bone_name)
+                if not candidates:
+                    self.get_logger().error(
+                        f"{chain_name} 链缺少 {bone_name} 节点; "
+                        f"该链现有: {sorted(bones)}"
+                    )
+                    return np.zeros((21, 3), dtype=np.float32)
+                mediapipe_pose.append(
+                    self._node_position(min(candidates, key=lambda item: item.node_id))
+                )
 
-        # Convert to MediaPipe (21, 3) format
-        mediapipe_pose = np.zeros((21, 3), dtype=np.float32)
+        pose = np.asarray(mediapipe_pose, dtype=np.float32)
+        self._log_skeleton_sanity_once(pose)
+        return pose
 
-        for mp_idx, manus_node_id in enumerate(MEDIAPIPE_TO_MANUS):
-            if manus_node_id in manus_positions:
-                mediapipe_pose[mp_idx] = manus_positions[manus_node_id]
-            else:
-                return self._convert_to_mediapipe_semantic(msg)
+    def _log_skeleton_sanity_once(self, pose: np.ndarray) -> None:
+        """首帧打印一次选点后的骨架尺寸,便于当场看出取点是否仍然错位。"""
+        if self._skeleton_checked:
+            return
+        self._skeleton_checked = True
 
-        return mediapipe_pose
+        wrist_to_mcp = float(np.linalg.norm(pose[9] - pose[0]))
+        mcp_spread = float(np.linalg.norm(pose[17] - pose[5]))
+        proximal = float(np.linalg.norm(pose[6] - pose[5]))
+        self.get_logger().info(
+            f"[骨架自检] 腕->中指MCP={wrist_to_mcp * 100:.1f}cm "
+            f"MCP展宽={mcp_spread * 100:.1f}cm 食指近节={proximal * 100:.1f}cm"
+        )
+        if wrist_to_mcp < 0.05 or proximal > 0.060:
+            self.get_logger().error(
+                "[骨架自检] 尺寸不合常理 —— 取点可能仍然错位一节。"
+                "用 tools/dump_manus_nodes.py 核对节点拓扑,不要在此状态下 --control。"
+            )
 
     @staticmethod
     def _node_position(node) -> np.ndarray:
@@ -163,46 +212,11 @@ class ManusInputNode(Node):
             pose.position.z,
         ], dtype=np.float32)
 
-    @staticmethod
-    def _order_chain_nodes_by_joint_type(nodes) -> list:
-        by_type = {}
-        for node in nodes:
-            by_type.setdefault(node.joint_type, []).append(node)
-
-        def pick(*joint_types):
-            for joint_type in joint_types:
-                candidates = by_type.get(joint_type, [])
-                if candidates:
-                    return min(candidates, key=lambda item: item.node_id)
-            return None
-
-        ordered = [pick("MCP"), pick("PIP"), pick("DIP", "IP"), pick("TIP")]
-        if all(node is not None for node in ordered):
-            return ordered
-
-        priority = {"MCP": 0, "PIP": 1, "IP": 2, "DIP": 2, "TIP": 3}
-        typed = [node for node in nodes if node.joint_type in priority]
-        if len(typed) >= 4:
-            return sorted(typed, key=lambda item: (priority[item.joint_type], item.node_id))[-4:]
-        return []
-
-    def _convert_to_mediapipe_semantic(self, msg: ManusGlove) -> np.ndarray:
-        """Compatibility path for Manus messages that publish semantic node ids."""
-        hand_nodes = [node for node in msg.raw_nodes if node.chain_type == "Hand"]
-        if not hand_nodes:
-            return np.zeros((21, 3), dtype=np.float32)
-
-        wrist = min(hand_nodes, key=lambda node: node.node_id)
-        mediapipe_pose = [self._node_position(wrist)]
-
-        for chain_name in SEMANTIC_CHAIN_NAMES:
-            chain_nodes = [node for node in msg.raw_nodes if node.chain_type == chain_name]
-            finger_nodes = self._order_chain_nodes_by_joint_type(chain_nodes)
-            if len(finger_nodes) != 4:
-                return np.zeros((21, 3), dtype=np.float32)
-            mediapipe_pose.extend(self._node_position(node) for node in finger_nodes)
-
-        return np.asarray(mediapipe_pose, dtype=np.float32)
+    # 原有的 _order_chain_nodes_by_joint_type / _convert_to_mediapipe_semantic 已删除:
+    # 它们按 joint_type 字符串选 "MCP"/"PIP"/"DIP"/"TIP",而这些字符串正是被
+    # manus_ros2 的 JointTypeToString 错误标注的那一组,因此那条"语义后备路径"
+    # 与硬编码 id 路径犯的是同一个错。现在只保留 _convert_to_mediapipe 一条路径,
+    # 按骨头名选点。
 
     def _glove_callback(self, msg: ManusGlove) -> None:
         """Callback for glove data, determines left/right based on msg.side."""

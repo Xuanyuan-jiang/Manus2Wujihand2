@@ -523,18 +523,33 @@ std::string ManusDataPublisher::SideToString(Side p_Side){
     }
 }
 
+/// @brief Report the SDK's bone name verbatim.
+///
+/// FingerJointType names a BONE, and each node sits at that bone's ROOT.
+/// The previous implementation translated these into joint names (MCP/PIP/...)
+/// and was off by one in doing so: it labelled the metacarpal's root "MCP",
+/// while the joint actually at that location is the wrist-side carpometacarpal
+/// one.  The metacarpophalangeal (MCP) joint is the root of the PROXIMAL bone.
+///
+/// Consumers were therefore led to treat the metacarpal root as the MCP and to
+/// drop the fingertip entirely, shifting every finger one joint proximally.
+/// Reporting the bone name removes the interpretation — and the chance to get
+/// it wrong — and lets each consumer map bones to joints as it needs:
+///
+///     MediaPipe thumb  (CMC, MCP, IP,  TIP) = Metacarpal, Proximal, Intermediate, Tip
+///     MediaPipe finger (MCP, PIP, DIP, TIP) = Proximal, Intermediate, Distal, Tip
 std::string ManusDataPublisher::JointTypeToString(FingerJointType p_FingerJointType){
     switch(p_FingerJointType){
         case FingerJointType_Metacarpal:
-            return "MCP";
+            return "Metacarpal";
         case FingerJointType_Proximal:
-            return "PIP";
+            return "Proximal";
         case FingerJointType_Intermediate:
-            return "IP";
+            return "Intermediate";
         case FingerJointType_Distal:
-            return "DIP";
+            return "Distal";
         case FingerJointType_Tip:
-            return "TIP";
+            return "Tip";
         default:
             return "Invalid";
     }
