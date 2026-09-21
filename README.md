@@ -87,14 +87,35 @@ ros2 run manus_input_py manus_input --config config/manus_input_right_only.yaml
 
 ## 已知问题
 
-**`/hand_input` 骨架整体错位一节（未修，见 `docs/` 或提交历史）。**
+**`/hand_input` 骨架整体错位一节（未修）。** 后果是 retarget 输出让除拇指外四指
+同向外摆（abd 约 +20/+13/+10/+10 度）。
 
-`manus_input_py` 每根手指发布的 4 个点实际是 `[掌骨根, MCP, PIP, DIP]`，而 MediaPipe 要的是
-`[MCP, PIP, DIP, TIP]`，指尖从未发布。后果是 retarget 输出让除拇指外四指同向外摆
-（abd 约 +20/+13/+10/+10 度）。
+根因在 `manus_ros2/src/ManusDataPublisher.cpp` 的 `JointTypeToString`：MANUS SDK 的
+`FingerJointType` 按**骨头**命名，该函数翻译成按**关节**命名的字符串时整体错了一位。
 
-判据：四个「MCP」的 z 坐标 bit 级相同；腕→「MCP」仅 2.3–3.5 cm（应 7–10）；
-「近节指骨」6.6–7.5 cm（实为掌骨长度）。
+| SDK 枚举（骨头） | 节点实际位置 | 代码标成 | 应该是 |
+|---|---|---|---|
+| `_Metacarpal` | 掌骨根 ≈ 腕 | `"MCP"` | 腕/掌骨根 |
+| `_Proximal` | 近节指骨根 | `"PIP"` | **`"MCP"`** |
+| `_Intermediate` | 中节指骨根 | `"IP"` | **`"PIP"`** |
+| `_Distal` | 远节指骨根 | `"DIP"` | `"DIP"` ✓ |
+| `_Tip` | 指尖 | `"TIP"` | `"TIP"` ✓ |
+
+骨骼绑定中节点位于骨头**根部**，「近节指骨的根」就是 MCP 关节。结果每根手指发布的
+4 个点是 `[掌骨根, MCP, PIP, DIP]`，而 MediaPipe 要 `[MCP, PIP, DIP, TIP]`，指尖从未发布。
+
+> ⚠️ `manus_input_py` 里的 `_convert_to_mediapipe_semantic` 看似是条正确的后备路径，
+> 但它正是按这些已被错误标注的 `joint_type` 字符串选点的，**改走语义路径修不好**。
+
+检查方式：
+
+```bash
+# 几何判据（离线跑已抓好的帧，或 --live 直接订阅）
+python3 tools/check_hand_input.py tests/data/hand_input_straight.yaml --retarget
+
+# 手套节点拓扑与每段骨长（需先 source env_ros.sh）
+python3 tools/dump_manus_nodes.py
+```
 
 这个错误姿态在 ±40° 限位之内，**clamp 拦不住**。修复前请勿使用 `--control`。
 
@@ -107,7 +128,7 @@ config/          manus_input 配置、MANUS dongle udev 规则
 scripts/         01..03 为 SDK 连通性检查，04 为主遥操节点
 ros2_ws/src/     三个 MANUS ROS 2 包（vendored，见下）
 tests/data/      实录 /hand_input 帧
-tools/           MANUS SDK 恢复脚本
+tools/           MANUS SDK 恢复脚本、骨架错位检查工具
 ```
 
 ## 第三方代码来源
