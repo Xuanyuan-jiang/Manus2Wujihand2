@@ -27,7 +27,7 @@ if [[ ! -x "$WUJI2_PYTHON" ]]; then
   exit 1
 fi
 if [[ ! -f "$PROJECT_ROOT/ros2_ws/install/setup.bash" ]]; then
-  echo "ERROR: ROS workspace is not built; follow DEPLOY.md step 5 first" >&2
+  echo "ERROR: ROS workspace is not built; follow README.md「编译 ROS 2 包」first" >&2
   exit 1
 fi
 

@@ -4,13 +4,13 @@
 本脚本刻意不调用: enable() / joint_command().publish() / effort_limit().set()
 / mit_params().set() / set_origin() / reboot()。
 """
-import sys, time
+import os, sys, time
 
-EXPECT_PREFIX = "/home/mzsun/miniconda3/envs/wuji2"
-if not sys.prefix.startswith(EXPECT_PREFIX):
+EXPECT_ENV = os.environ.get("WUJI2_ENV", "wuji2")
+if os.path.basename(sys.prefix) != EXPECT_ENV:
     sys.exit(f"ERROR: 跑在了错误的解释器 {sys.executable} (prefix={sys.prefix})。\n"
              f"       base env 也装了 wuji_sdk, 不会报错但环境是错的。\n"
-             f"       请先 `source /home/mzsun/Projects/Wuji2_xyj/env.sh`。")
+             f"       请先 `source <仓库根>/env.sh`，或直接用 conda 环境 {EXPECT_ENV} 的 python。")
 
 from wuji_sdk import SdkManager, DeviceType, Handedness, set_log_level
 

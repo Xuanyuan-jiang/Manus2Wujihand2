@@ -37,7 +37,7 @@ from wuji_sdk import SdkManager, WujiHand2
 JOINT_COUNT = 20
 # 本机的两只 Hand 2，与 04_manus_wuji2.py 保持一致。
 DEFAULT_ADDRESSES = {
-    "right": "192.168.1.111:7447",  # WH2KA01260818006
+    "right": "192.168.1.111:7447",  # WH2KA01260817029
     "left": "192.168.1.110:7447",   # WH2JA01260813009
 }
 # 固件的 severity 分级里只有 Warning 不停机，见 04_manus_wuji2.py 的 split_joint_errors。

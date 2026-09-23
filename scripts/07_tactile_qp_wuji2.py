@@ -66,7 +66,7 @@ from wuji_sdk import JointCommand, SdkManager, WujiHand2  # noqa: E402
 JOINT_COUNT = 20
 FINGERS = ("thumb", "index", "middle", "ring", "pinky")
 DEFAULT_ADDRESSES = {
-    "right": "192.168.1.111:7447",  # WH2KA01260818006
+    "right": "192.168.1.111:7447",  # WH2KA01260817029
     "left": "192.168.1.110:7447",   # WH2JA01260813009
 }
 _URDF_ROOT = Path(

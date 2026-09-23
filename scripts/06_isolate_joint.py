@@ -33,7 +33,7 @@ from wuji_sdk import SdkManager, WujiHand2
 
 JOINT_COUNT = 20
 DEFAULT_ADDRESSES = {
-    "right": "192.168.1.111:7447",  # WH2KA01260818006
+    "right": "192.168.1.111:7447",  # WH2KA01260817029
     "left": "192.168.1.110:7447",   # WH2JA01260813009
 }
 # 订阅后的第一帧 comm_response_rate_pct 还没算出来，丢掉它。同 05_clear_faults.py。

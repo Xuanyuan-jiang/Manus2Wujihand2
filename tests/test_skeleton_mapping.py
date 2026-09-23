@@ -111,11 +111,13 @@ LEFT_HAND_FLEXED_45 = (
 
 def check_chirality(node) -> list[str]:
     """右手屈曲姿态的手性必须为负；镜像后必须为正。"""
+    from manus_input_py.manus_input_node import CHIRALITY_CONSISTENT_FRAMES, CHIRALITY_MIN_PALMAR_M
+
     failures = []
     right = np.asarray(RIGHT_HAND_FLEXED_45, dtype=np.float32)
     value, confidence = node._chirality(right)
     print(f"  右手 URDF 屈曲 45 度: 手性={value:+.4e} 可信度={confidence:.4e}", end="")
-    if confidence < 0.015:
+    if confidence < CHIRALITY_MIN_PALMAR_M:
         failures.append(f"基准姿态的可信度只有 {confidence:.4e}，判据已退化")
     if value >= 0:
         failures.append(f"右手手性应为负，实际 {value:+.4e}")
@@ -139,10 +141,85 @@ def check_chirality(node) -> list[str]:
     flat = right.copy()
     flat[:, 1] = 0.0
     _, flat_conf = node._chirality(flat)
-    if flat_conf >= 0.015:
+    if flat_conf >= CHIRALITY_MIN_PALMAR_M:
         failures.append(f"摊平手的可信度应低于阈值，实际 {flat_conf:.4e}")
 
-    print(f"  -> {'FAIL' if failures else 'PASS'}")
+    # 实机误报过的两种姿态：手指伸直但中指侧偏 2 cm、略微后翘 0.3 cm；中指后翘 1.5 cm。
+    # 旧判据把侧偏算进可信度（|curl| 约 2 cm > 1.5 cm），按后翘的符号报了「镜像」。
+    u = flat[9] - flat[0]
+    lateral = np.array([u[2], 0.0, -u[0]], dtype=np.float32)
+    lateral /= np.linalg.norm(lateral)
+    for label, shift, palmar in (
+        ("中指侧偏 2cm+后翘 0.3cm", 0.02 * lateral + np.array([0, 0.003, 0], np.float32), 0.003),
+        ("中指后翘 1.5cm", np.array([0, 0.015, 0], np.float32), 0.015),
+    ):
+        pose = flat.copy()
+        pose[10:13] += shift * np.array([[1 / 3], [2 / 3], [1.0]], dtype=np.float32)
+        _, conf = node._chirality(pose)
+        if abs(conf - palmar) > 1e-3:
+            failures.append(f"{label}：可信度应只算掌背分量 {palmar:.3f}，实际 {conf:.4e}（侧偏被算进去了？）")
+        if conf >= CHIRALITY_MIN_PALMAR_M:
+            failures.append(f"{label} 的可信度应低于阈值，实际 {conf:.4e}")
+
+    # 实机读数：右手伸直时默认标定读出 +3.2 cm「后翘」，未戴的左手套静置读出 -4.1 cm。
+    # 两者都不能算作证据，否则会误报镜像，真镜像时也会被当成正常屈曲放过。
+    for v in (0.032, -0.041):
+        if node._next_chirality_streak((0, 0), v) != (0, 0):
+            failures.append(f"掌背分量 {v * 100:+.1f}cm 不应计入手性判定")
+
+    # 连续帧判定：不可信帧清零，符号变化从 1 重计，连续够数才算。
+    streak = (0, 0)
+    for v in [-0.06] * (CHIRALITY_CONSISTENT_FRAMES - 1) + [0.01]:
+        streak = node._next_chirality_streak(streak, v)
+    if streak != (0, 0):
+        failures.append(f"不可信帧应把计数清零，实际 {streak}")
+    for v in [-0.06, +0.06] + [-0.06] * CHIRALITY_CONSISTENT_FRAMES:
+        streak = node._next_chirality_streak(streak, v)
+    if streak != (-1, CHIRALITY_CONSISTENT_FRAMES):
+        failures.append(f"连续同号帧计数错误，实际 {streak}")
+
+    print(f"\n  误报姿态与连续帧判定 -> {'FAIL' if failures else 'PASS'}")
+    return failures
+
+
+def check_chirality_verdicts(node) -> list[str]:
+    """持续监视：镜像告警只报一次，之后握拳正常时撤销，结论不变时不重复打日志。"""
+    from manus_input_py.manus_input_node import CHIRALITY_CONSISTENT_FRAMES
+
+    class Recorder:
+        def __init__(self):
+            self.lines = []
+        def info(self, msg):
+            self.lines.append(("info", msg))
+        def warning(self, msg):
+            self.lines.append(("warning", msg))
+        def error(self, msg):
+            self.lines.append(("error", msg))
+
+    rec = Recorder()
+    original_get_logger = node.get_logger
+    node.get_logger = lambda: rec
+    node._skeleton_checked = {"right": True, "left": True}
+    node._chirality_streak = {"right": (0, 0), "left": (0, 0)}
+    node._chirality_verdict = {"right": None, "left": None}
+
+    fist = np.asarray(RIGHT_HAND_FLEXED_45, dtype=np.float32)
+    mirrored = fist.copy()
+    mirrored[:, 1] *= -1
+    n = CHIRALITY_CONSISTENT_FRAMES
+    try:
+        for pose in [mirrored] * (n + 5) + [fist] * (n + 5):
+            node._skeleton_self_check(pose, "Right")
+    finally:
+        node.get_logger = original_get_logger
+
+    failures = []
+    levels = [level for level, _ in rec.lines]
+    if levels != ["error", "info"]:
+        failures.append(f"期望先 1 条镜像 error、再 1 条恢复 info，实际 {levels}")
+    elif "恢复正常" not in rec.lines[1][1]:
+        failures.append(f"第二条应为「恢复正常」，实际 {rec.lines[1][1]}")
+    print(f"  镜像告警与撤销 -> {'FAIL' if failures else 'PASS'}")
     return failures
 
 
@@ -220,6 +297,7 @@ def main() -> int:
         failures = run_case(node, legacy=True) + run_case(node, legacy=False)
         print("\n手性基准（防止 y 取反被误改）：")
         failures += check_chirality(node)
+        failures += check_chirality_verdicts(node)
         node.destroy_node()
     finally:
         if rclpy.ok():

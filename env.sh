@@ -1,5 +1,11 @@
-# source this: activates conda env wuji2 and exports project paths
-export WUJI2_PROJ="${WUJI2_PROJ:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+# source this (bash or zsh): activates conda env wuji2 and exports project paths
+if [ -n "${ZSH_VERSION:-}" ]; then
+  eval '_wuji2_src=${(%):-%x}'
+else
+  _wuji2_src=${BASH_SOURCE[0]}
+fi
+export WUJI2_PROJ="${WUJI2_PROJ:-$(cd "$(dirname "$_wuji2_src")" && pwd)}"
+unset _wuji2_src
 export WUJI2_CONDA="${WUJI2_CONDA:-$HOME/miniconda3}"
 export WUJI2_ENV="${WUJI2_ENV:-wuji2}"
 export WUJI2_PY="$WUJI2_CONDA/envs/$WUJI2_ENV/bin/python"

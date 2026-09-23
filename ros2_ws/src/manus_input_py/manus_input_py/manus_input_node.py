@@ -19,6 +19,7 @@ except ImportError as exc:
 
 try:
     import rclpy
+    from rclpy.executors import ExternalShutdownException
     from rclpy.node import Node
     from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
     from std_msgs.msg import Float32MultiArray
@@ -61,6 +62,14 @@ LEGACY_JOINT_TYPE_ALIASES = {
     "DIP": "Distal",
     "TIP": "Tip",
 }
+
+# 手性判据只采信握拳级别的读数：掌背方向分量至少 5 cm。实测握拳 4.5-8 cm；
+# 手指伸直时默认标定会读出最多 +3.2 cm 的「后翘」，没戴在手上的手套静置时读过
+# 反向 4.1 cm。门槛两个方向相同 —— 低了既会误报镜像，也会在真镜像时把后翘读数
+# 当成正常屈曲放过。
+CHIRALITY_MIN_PALMAR_M = 0.05
+# 连续这么多帧可信且同号才下结论，滤掉单帧毛刺（120 Hz 下约 0.08 s）。
+CHIRALITY_CONSISTENT_FRAMES = 10
 
 
 @dataclass
@@ -121,8 +130,10 @@ class ManusInputNode(Node):
         # 否则下游 retarget 会持续输出同一姿态导致实体手抖动。
         self._fingers: Dict[str, Optional[np.ndarray]] = {"right": None, "left": None}
         self._pending: Dict[str, bool] = {"right": False, "left": False}
-        # 首帧骨架自检每只手各做一次
+        # 骨架自检：尺寸在首帧查一次；手性持续监视，握拳时连续多帧可信才给结论
         self._skeleton_checked: Dict[str, bool] = {"right": False, "left": False}
+        self._chirality_streak: Dict[str, tuple] = {"right": (0, 0), "left": (0, 0)}
+        self._chirality_verdict: Dict[str, Optional[str]] = {"right": None, "left": None}
 
         self._enabled_sides = tuple(
             side for side, on in (("right", config.include_right_hand),
@@ -200,7 +211,7 @@ class ManusInputNode(Node):
                 )
 
         pose = np.asarray(mediapipe_pose, dtype=np.float32)
-        self._log_skeleton_sanity_once(pose, msg.side)
+        self._skeleton_self_check(pose, msg.side)
         return pose
 
     @staticmethod
@@ -214,9 +225,10 @@ class ManusInputNode(Node):
 
         基准取自 Hand 2 的 ``right.urdf``:屈曲 30-60 度时为 -5.5e-2 ~ -7.1e-2。
 
-        可信度即 ``|curl|``。手指伸直时 curl 趋近 0,判据退化,符号不可信 ——
-        这正是早期判据在摊平手上误判的原因,所以这里把它一并返回,由调用方决定
-        是否采信。
+        可信度就是值的绝对值，即中指尖在掌背方向上偏离掌轴的距离，低于
+        ``CHIRALITY_MIN_PALMAR_M`` 就不采信。早期版本用 ``|curl|`` 当可信度，把
+        侧向偏移也算了进去：手指伸直但偏向一侧时会越过门槛，再按随机的符号误报
+        「镜像」。
         """
         u = pose[9] - pose[0]
         r = pose[5] - pose[17]
@@ -228,45 +240,68 @@ class ManusInputNode(Node):
         u_hat = u / norm_u
         v = pose[12] - pose[9]
         curl = v - np.dot(v, u_hat) * u_hat
-        return float(np.dot(curl, n / norm_n)), float(np.linalg.norm(curl))
+        value = float(np.dot(curl, n / norm_n))
+        return value, abs(value)
 
-    def _log_skeleton_sanity_once(self, pose: np.ndarray, side: str) -> None:
-        """首帧打印一次选点后的骨架尺寸与手性,便于当场发现取点或镜像问题。"""
+    @staticmethod
+    def _next_chirality_streak(streak: tuple, value: float) -> tuple:
+        """更新 ``(符号, 连续帧数)``。不可信的帧清零，符号变了从 1 重新计。"""
+        if abs(value) < CHIRALITY_MIN_PALMAR_M:
+            return (0, 0)
+        sign = 1 if value > 0 else -1
+        return (sign, streak[1] + 1) if sign == streak[0] else (sign, 1)
+
+    def _skeleton_self_check(self, pose: np.ndarray, side: str) -> None:
+        """骨架自检，便于当场发现取点或镜像问题。
+
+        尺寸在首帧查一次。手性不能只看首帧：首帧恰好手指伸直或后翘时判据退化，
+        会误报镜像。这里持续监视，连续 ``CHIRALITY_CONSISTENT_FRAMES`` 帧可信且
+        同号才给结论，结论变化时才打日志：先前误报的镜像会被之后的握拳撤销，
+        中途数据变镜像也会报出来。
+        """
         key = side.lower()
-        if self._skeleton_checked.get(key, True):
+        if key not in self._chirality_verdict:
             return
-        self._skeleton_checked[key] = True
+        log = self.get_logger()
 
-        wrist_to_mcp = float(np.linalg.norm(pose[9] - pose[0]))
-        mcp_spread = float(np.linalg.norm(pose[17] - pose[5]))
-        proximal = float(np.linalg.norm(pose[6] - pose[5]))
-        chirality, confidence = self._chirality(pose)
-        self.get_logger().info(
-            f"[骨架自检 {side}] 腕->中指MCP={wrist_to_mcp * 100:.1f}cm "
-            f"MCP展宽={mcp_spread * 100:.1f}cm 食指近节={proximal * 100:.1f}cm "
-            f"手性={chirality:+.2e}(可信度{confidence * 100:.1f}cm)"
-        )
-        if wrist_to_mcp < 0.05 or proximal > 0.060:
-            self.get_logger().error(
-                f"[骨架自检 {side}] 尺寸不合常理 —— 取点可能错位一节。"
-                "用 tools/dump_manus_nodes.py 核对节点拓扑,不要在此状态下 --control。"
+        if not self._skeleton_checked[key]:
+            self._skeleton_checked[key] = True
+            wrist_to_mcp = float(np.linalg.norm(pose[9] - pose[0]))
+            mcp_spread = float(np.linalg.norm(pose[17] - pose[5]))
+            proximal = float(np.linalg.norm(pose[6] - pose[5]))
+            log.info(
+                f"[骨架自检 {side}] 腕->中指MCP={wrist_to_mcp * 100:.1f}cm "
+                f"MCP展宽={mcp_spread * 100:.1f}cm 食指近节={proximal * 100:.1f}cm"
             )
+            if wrist_to_mcp < 0.05 or proximal > 0.060:
+                log.error(
+                    f"[骨架自检 {side}] 尺寸不合常理 —— 取点可能错位一节。"
+                    "用 tools/dump_manus_nodes.py 核对节点拓扑，不要进入实体控制（只跑 --dry-run）。"
+                )
+            log.info(f"[骨架自检 {side}] 手性判定中：戴好手套后握一下拳即可给出结论")
 
-        # 手指伸直时判据退化,不足以判手性 —— 报告但不下结论。
-        if confidence < 0.015:
-            self.get_logger().warning(
-                f"[骨架自检 {side}] 手性判据退化(可信度仅 {confidence * 100:.1f}cm,需 >1.5cm)。"
-                "手指伸直时无法判定手性,请弯曲手指后重启本节点再看。"
-            )
+        value, _ = self._chirality(pose)
+        sign, count = self._next_chirality_streak(self._chirality_streak[key], value)
+        self._chirality_streak[key] = (sign, count)
+        if count < CHIRALITY_CONSISTENT_FRAMES:
             return
 
-        expected_negative = side.lower() == "right"
-        mirrored = (chirality > 0) if expected_negative else (chirality < 0)
-        if mirrored:
-            self.get_logger().error(
-                f"[骨架自检 {side}] 手性与 side='{side}' 相反 —— 数据被镜像了。"
-                "retarget 会把屈曲解成伸展,实体手将朝手背方向持续运动。"
-                "绝对不要在此状态下 --control。"
+        expected = -1 if key == "right" else 1
+        verdict = "ok" if sign == expected else "mirrored"
+        previous = self._chirality_verdict[key]
+        if verdict == previous:
+            return
+        self._chirality_verdict[key] = verdict
+        detail = f"掌背分量 {value * 100:+.1f}cm，连续 {count} 帧一致"
+        if verdict == "ok":
+            prefix = "手性恢复正常，先前的镜像告警不成立" if previous == "mirrored" else "手性正常"
+            log.info(f"[骨架自检 {side}] {prefix}：{detail}（右手应为负、左手应为正）")
+        else:
+            log.error(
+                f"[骨架自检 {side}] 手性与 side='{side}' 相反 —— 数据被镜像了（{detail}）。"
+                "retarget 会把屈曲解成伸展，实体手将朝手背方向持续运动。"
+                "绝对不要进入实体控制（只跑 --dry-run）。手套没戴在手上时读数无意义，"
+                "戴好后握拳：若之后出现「手性恢复正常」则本条不成立。"
             )
 
     @staticmethod
@@ -362,11 +397,13 @@ def main(argv: Optional[list[str]] = None) -> None:
     node = ManusInputNode(config)
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
+        # rclpy 自己的 SIGINT 处理器会先关掉 context，这是操作者主动停机，不是故障。
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":

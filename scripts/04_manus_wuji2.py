@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Safely retarget ROS hand-input data to a Wuji Hand 2 (left or right).
 
-The default mode is dry-run: it only prints the 20 retargeted joint angles and
-never connects to, enables, or commands the physical hand.  Hardware control
-requires both --control and an explicit confirmation phrase.
+By default it connects to, enables, and commands the physical hand.  With
+--dry-run it only prints the 20 retargeted joint angles and never connects.
 """
 
 from __future__ import annotations
@@ -41,7 +40,7 @@ INPUT_FLOAT_COUNT = 21 * 3
 # 关节故障按 severity 分级失能。改动参数前先看 README 的「安全」一节。
 # 本机的两只 Hand 2。handedness 已逐台向设备核实（h.handedness()），不是靠 SN 猜的。
 DEFAULT_ADDRESSES = {
-    "right": "192.168.1.111:7447",  # WH2KA01260818006
+    "right": "192.168.1.111:7447",  # WH2KA01260817029
     "left": "192.168.1.110:7447",   # WH2JA01260813009
 }
 
