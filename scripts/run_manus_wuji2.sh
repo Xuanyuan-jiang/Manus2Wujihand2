@@ -75,20 +75,36 @@ for arg in "${PASSTHROUGH[@]}"; do
 done
 
 declare -A PIDS=()
+CLEANED=0
 
-shutdown() {
-  trap - INT TERM
-  echo ""
-  echo "[both] 正在停止两个控制节点（等待它们失能并断开）…" >&2
+# 收尾：给还活着的子进程发 SIGINT，等它们在 finally 里失能并断开。
+# 幂等 —— INT/TERM 与 EXIT 两条路径都会调它。
+cleanup() {
+  if ((CLEANED)); then
+    return 0
+  fi
+  CLEANED=1
+  if ((${#PIDS[@]} == 0)); then
+    return 0
+  fi
+  local side
+  echo "" >&2
+  echo "[both] 正在停止剩余控制节点（等待它们失能并断开）…" >&2
   for side in "${!PIDS[@]}"; do
     kill -INT "${PIDS[$side]}" 2>/dev/null || true
   done
   for side in "${!PIDS[@]}"; do
     wait "${PIDS[$side]}" 2>/dev/null || true
   done
-  echo "[both] 两个节点已退出。" >&2
+  echo "[both] 已全部退出。" >&2
 }
-trap shutdown INT TERM
+
+# EXIT 也必须收尾，不只是 INT/TERM。脚本一旦因为别的原因退出（errexit、语法
+# 错误、被 SIGHUP 带走），还在驱动实体手的子进程就会被 init 收养：那时它已经
+# 脱离终端的前台进程组，Ctrl+C 根本打不到它，只能靠 kill 去找 pid。
+# 这里踩过一次 —— 循环里的裸 wait 触发 errexit，把左手丢成了孤儿。
+trap 'trap - INT TERM EXIT; cleanup; exit 130' INT TERM
+trap cleanup EXIT
 
 for side in right left; do
   "$WUJI2_PYTHON" "$NODE" --side "$side" "${PASSTHROUGH[@]}" &
@@ -106,8 +122,10 @@ while ((${#PIDS[@]})); do
   fi
   for side in "${!PIDS[@]}"; do
     if ! kill -0 "${PIDS[$side]}" 2>/dev/null; then
-      wait "${PIDS[$side]}" 2>/dev/null
-      status=$?
+      # `|| status=$?` 不能省：裸 wait 会把子进程的非零退出码交给 errexit，
+      # 脚本当场就死，下面这些消息一句都打不出来。
+      status=0
+      wait "${PIDS[$side]}" 2>/dev/null || status=$?
       if ((status == 0)); then
         echo "[both] $side hand 已正常退出。" >&2
       else
